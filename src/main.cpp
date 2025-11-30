@@ -57,6 +57,32 @@ void testExchange(const std::string& exchangeName, const std::string& symbol) {
             std::cerr << "  FAILED: " << e.what() << std::endl;
         }
 
+        // 5. Instruments
+        std::cout << "[Instruments] Fetching..." << std::endl;
+        try {
+            auto instruments = exchange.fetchInstruments();
+            std::cout << "  Count: " << instruments.size() << std::endl;
+            if (!instruments.empty()) {
+                std::cout << "  Example: " << instruments[0].symbol << std::endl;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "  FAILED: " << e.what() << std::endl;
+        }
+
+        // 6. Private API Connectivity Check (Expected to fail gracefully)
+        std::cout << "[Private] Connectivity Check..." << std::endl;
+        try {
+            exchange.fetchBalance();
+            std::cerr << "  ERROR: Should have thrown API Key required exception" << std::endl;
+        } catch (const std::runtime_error& e) {
+            std::string msg = e.what();
+            if (msg.find("API Key required") != std::string::npos) {
+                std::cout << "  PASS: Correctly detected missing API Key." << std::endl;
+            } else {
+                std::cout << "  FAILED: Unexpected error: " << msg << std::endl;
+            }
+        }
+
     } catch (const std::exception& e) {
         std::cerr << "CRITICAL ERROR initializing " << exchangeName << ": " << e.what() << std::endl;
     }
@@ -88,8 +114,11 @@ int main() {
         {"kucoin", "BTC-USDT"},
         {"gemini", "btcusd"},
         {"bitstamp", "btcusd"},
-        {"huobi", "btcusdt"}, // Huobi might be blocked
-        {"okx", "BTC-USDT"}, // OKX might be blocked
+        {"huobi", "btcusdt"},
+        {"okx", "BTC-USDT"},
+        // {"binance-usds-futures", "BTCUSDT"}, // Geo-blocked in US/Sandbox
+        // {"kraken-futures", "pf_xbtusd"}, // Network timeouts in Sandbox
+        {"gateio-perpetual-futures", "BTC_USDT"},
     };
 
     for (const auto& target : targets) {

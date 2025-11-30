@@ -35,6 +35,9 @@ add_definitions(-DCCAPI_ENABLE_EXCHANGE_BITSTAMP)
 add_definitions(-DCCAPI_ENABLE_EXCHANGE_BYBIT)
 add_definitions(-DCCAPI_ENABLE_EXCHANGE_OKX)
 add_definitions(-DCCAPI_ENABLE_EXCHANGE_HUOBI)
+add_definitions(-DCCAPI_ENABLE_EXCHANGE_BINANCE_USDS_FUTURES)
+add_definitions(-DCCAPI_ENABLE_EXCHANGE_BINANCE_COIN_FUTURES)
+add_definitions(-DCCAPI_ENABLE_EXCHANGE_GATEIO_PERPETUAL_FUTURES)
 add_definitions(-DCCAPI_ENABLE_LOG_TRACE) # Enable logs for debugging
 
 # Main library (header-only wrapper) interface

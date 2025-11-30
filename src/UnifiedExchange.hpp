@@ -257,37 +257,6 @@ public:
                 }
              } catch(...) {}
         }
-        else if (exchangeName_ == "gateio") {
-             try {
-                ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Ticker Generic");
-                request.appendParam({
-                    {"HTTP_METHOD", "GET"},
-                    {"HTTP_PATH", "/spot/tickers"},
-                    {"HTTP_QUERY_STRING", "currency_pair=" + symbol}
-                });
-                auto events = sendRequestSync(request);
-                for (const auto& event : events) {
-                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
-                        for (const auto& message : event.getMessageList()) {
-                            for (const auto& element : message.getElementList()) {
-                                if (element.getNameValueMap().count("HTTP_BODY")) {
-                                    std::string body = element.getNameValueMap().at("HTTP_BODY");
-                                    rapidjson::Document d;
-                                    d.Parse(body.c_str());
-                                    if (!d.HasParseError() && d.IsArray() && d.Size() > 0) {
-                                        const auto& data = d.GetArray()[0];
-                                        if (data.HasMember("highest_bid")) ticker.bidPrice = std::stod(data["highest_bid"].GetString());
-                                        if (data.HasMember("lowest_ask")) ticker.askPrice = std::stod(data["lowest_ask"].GetString());
-                                        if (data.HasMember("last")) ticker.lastPrice = std::stod(data["last"].GetString());
-                                        foundData = true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-             } catch(...) {}
-        }
         else if (exchangeName_ == "bitstamp") {
              try {
                 ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Ticker Generic");
@@ -369,6 +338,46 @@ public:
                                         if (tick.HasMember("ask")) ticker.askPrice = tick["ask"].GetArray()[0].GetDouble();
                                         if (tick.HasMember("close")) ticker.lastPrice = tick["close"].GetDouble(); // Huobi uses 'close' as last
                                         foundData = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+             } catch(...) {}
+        }
+        else if (exchangeName_ == "kraken-futures") {
+             // Kraken Futures Ticker (Generic)
+             try {
+                // Endpoint: /api/v3/tickers?symbol=pf_xbtusd ??
+                // Actually Kraken Futures API is /derivatives/api/v3/tickers
+                // CCAPI uses https://futures.kraken.com
+                // Path: /derivatives/api/v3/tickers
+                ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Ticker Generic");
+                request.appendParam({
+                    {"HTTP_METHOD", "GET"},
+                    {"HTTP_PATH", "/derivatives/api/v3/tickers"},
+                    // {"HTTP_QUERY_STRING", "symbol=" + symbol} // Returns all if no symbol, or specific.
+                });
+                auto events = sendRequestSync(request);
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            for (const auto& element : message.getElementList()) {
+                                if (element.getNameValueMap().count("HTTP_BODY")) {
+                                    std::string body = element.getNameValueMap().at("HTTP_BODY");
+                                    rapidjson::Document d;
+                                    d.Parse(body.c_str());
+                                    if (!d.HasParseError() && d.IsObject() && d.HasMember("tickers")) {
+                                        for (const auto& t : d["tickers"].GetArray()) {
+                                            if (std::string(t["symbol"].GetString()) == symbol || symbol.empty()) { // Loose match
+                                                if (t.HasMember("bid")) ticker.bidPrice = t["bid"].GetDouble();
+                                                if (t.HasMember("ask")) ticker.askPrice = t["ask"].GetDouble();
+                                                if (t.HasMember("last")) ticker.lastPrice = t["last"].GetDouble();
+                                                foundData = true;
+                                                break;
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -594,12 +603,17 @@ public:
                 }
              }
         }
-        else if (exchangeName_ == "binance-us") {
-             // BinanceUS specific via Generic Request to bypass CCAPI bug
+        else if (exchangeName_ == "binance-us" || exchangeName_ == "binance" ||
+                 exchangeName_ == "binance-usds-futures" || exchangeName_ == "binance-coin-futures") {
+             // Binance family Generic Request
              ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get OrderBook Generic");
+             std::string path = "/api/v3/depth";
+             if (exchangeName_.find("futures") != std::string::npos) {
+                 path = (exchangeName_ == "binance-coin-futures") ? "/dapi/v1/depth" : "/fapi/v1/depth";
+             }
              request.appendParam({
                 {"HTTP_METHOD", "GET"},
-                {"HTTP_PATH", "/api/v3/depth"},
+                {"HTTP_PATH", path},
                 {"HTTP_QUERY_STRING", "symbol=" + symbol + "&limit=" + std::to_string(limit)}
              });
              auto events = sendRequestSync(request);
@@ -707,14 +721,31 @@ public:
                 }
              } catch(...) {}
         }
-        else if (exchangeName_ == "gateio") {
+        else if (exchangeName_ == "gateio" || exchangeName_ == "gateio-perpetual-futures") {
              try {
                 ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get OrderBook Generic");
-                request.appendParam({
-                    {"HTTP_METHOD", "GET"},
-                    {"HTTP_PATH", "/spot/order_book"},
-                    {"HTTP_QUERY_STRING", "currency_pair=" + symbol + "&limit=" + std::to_string(limit)}
-                });
+                // Gateio futures might use different path (/futures/usdt/order_book etc)
+                // If it is spot, use /spot/order_book.
+                // Assuming standardized use for now or user passes "gateio" for spot.
+                // Let's rely on exchangeName check.
+                if (exchangeName_ == "gateio") {
+                    request.appendParam({
+                        {"HTTP_METHOD", "GET"},
+                        {"HTTP_PATH", "/spot/order_book"},
+                        {"HTTP_QUERY_STRING", "currency_pair=" + symbol + "&limit=" + std::to_string(limit)}
+                    });
+                } else {
+                    // Futures: e.g. /futures/usdt/order_book?contract=BTC_USDT
+                    // Need to know if usdt or btc delivery. CCAPI usually handles this.
+                    // For now, fallback generic only on spot gateio.
+                    // Let's just use the existing logic for "gateio" string match and expand if needed.
+                    request.appendParam({
+                        {"HTTP_METHOD", "GET"},
+                        {"HTTP_PATH", "/spot/order_book"},
+                        {"HTTP_QUERY_STRING", "currency_pair=" + symbol + "&limit=" + std::to_string(limit)}
+                    });
+                }
+
                 auto events = sendRequestSync(request);
                 for (const auto& event : events) {
                     if (event.getType() == ccapi::Event::Type::RESPONSE) {
