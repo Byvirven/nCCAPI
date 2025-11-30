@@ -27,9 +27,15 @@ add_definitions(-DCCAPI_ENABLE_SERVICE_EXECUTION_MANAGEMENT)
 add_definitions(-DCCAPI_ENABLE_EXCHANGE_BINANCE)
 add_definitions(-DCCAPI_ENABLE_EXCHANGE_BINANCE_US)
 add_definitions(-DCCAPI_ENABLE_EXCHANGE_COINBASE)
+add_definitions(-DCCAPI_ENABLE_EXCHANGE_KRAKEN)
+add_definitions(-DCCAPI_ENABLE_EXCHANGE_GATEIO)
+add_definitions(-DCCAPI_ENABLE_EXCHANGE_KUCOIN)
+add_definitions(-DCCAPI_ENABLE_EXCHANGE_GEMINI)
+add_definitions(-DCCAPI_ENABLE_EXCHANGE_BITSTAMP)
+add_definitions(-DCCAPI_ENABLE_EXCHANGE_BYBIT)
+add_definitions(-DCCAPI_ENABLE_EXCHANGE_OKX)
+add_definitions(-DCCAPI_ENABLE_EXCHANGE_HUOBI)
 add_definitions(-DCCAPI_ENABLE_LOG_TRACE) # Enable logs for debugging
-# add_definitions(-DCCAPI_ENABLE_EXCHANGE_OKX)
-# Add more as needed
 
 # Main library (header-only wrapper) interface
 add_library(unified_crypto INTERFACE)
