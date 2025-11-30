@@ -83,16 +83,12 @@ struct ExchangeConfig {
 // Main Wrapper Class
 class UnifiedExchange {
 public:
-    // Initialize static member if needed, or user does it.
-    // For header-only, we might need an inline definition or just ensure the user defines it.
-
     UnifiedExchange(const std::string& exchange, const ExchangeConfig& config = {})
         : exchangeName_(exchange), config_(config) {
 
         ccapi::SessionOptions sessionOptions;
         ccapi::SessionConfigs sessionConfigs;
-        // Adjust logging if needed
-        // ccapi::Logger::logger = nullptr; // Disable default logging to stdout if desired
+        // sessionOptions.enableDebugLog = true; // Uncomment for debugging
 
         session_ = std::make_unique<ccapi::Session>(sessionOptions, sessionConfigs);
     }
@@ -113,7 +109,6 @@ public:
         // Specialized handling for Quirky Exchanges
         if (exchangeName_ == "coinbase") {
             try {
-                // Use Generic Request for Coinbase Ticker
                 ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Ticker Generic");
                 request.appendParam({
                     {"HTTP_METHOD", "GET"},
@@ -154,8 +149,6 @@ public:
             }
         }
         else if (exchangeName_ == "okx") {
-            // OKX needs 'instType' param for GET_BBOS or use Generic
-            // Try Generic for safety as CCAPI might need instrument type explicitly passed
             try {
                 ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Ticker Generic");
                 request.appendParam({
@@ -188,8 +181,72 @@ public:
                 }
             } catch(...) {}
         }
+        else if (exchangeName_ == "cryptocom") {
+             try {
+                ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Ticker Generic");
+                request.appendParam({
+                    {"HTTP_METHOD", "GET"},
+                    {"HTTP_PATH", "/v2/public/get-ticker"},
+                    {"HTTP_QUERY_STRING", "instrument_name=" + symbol}
+                });
+                auto events = sendRequestSync(request);
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            for (const auto& element : message.getElementList()) {
+                                if (element.getNameValueMap().count("HTTP_BODY")) {
+                                    std::string body = element.getNameValueMap().at("HTTP_BODY");
+                                    rapidjson::Document d;
+                                    d.Parse(body.c_str());
+                                    if (!d.HasParseError() && d.IsObject() && d.HasMember("result") && d["result"].HasMember("data")) {
+                                        auto dataList = d["result"]["data"].GetArray();
+                                        if (dataList.Size() > 0) {
+                                            const auto& data = dataList[0];
+                                            if (data.HasMember("b")) ticker.bidPrice = data["b"].GetDouble();
+                                            if (data.HasMember("k")) ticker.askPrice = data["k"].GetDouble();
+                                            if (data.HasMember("a")) ticker.lastPrice = data["a"].GetDouble();
+                                            foundData = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+             } catch(...) {}
+        }
+        else if (exchangeName_ == "deribit") {
+             try {
+                ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Ticker Generic");
+                request.appendParam({
+                    {"HTTP_METHOD", "GET"},
+                    {"HTTP_PATH", "/public/ticker"},
+                    {"HTTP_QUERY_STRING", "instrument_name=" + symbol}
+                });
+                auto events = sendRequestSync(request);
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            for (const auto& element : message.getElementList()) {
+                                if (element.getNameValueMap().count("HTTP_BODY")) {
+                                    std::string body = element.getNameValueMap().at("HTTP_BODY");
+                                    rapidjson::Document d;
+                                    d.Parse(body.c_str());
+                                    if (!d.HasParseError() && d.IsObject() && d.HasMember("result")) {
+                                        auto res = d["result"].GetObject();
+                                        if (res.HasMember("best_bid_price")) ticker.bidPrice = res["best_bid_price"].GetDouble();
+                                        if (res.HasMember("best_ask_price")) ticker.askPrice = res["best_ask_price"].GetDouble();
+                                        if (res.HasMember("last_price")) ticker.lastPrice = res["last_price"].GetDouble();
+                                        foundData = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+             } catch(...) {}
+        }
         else if (exchangeName_ == "kraken") {
-             // Kraken REST Ticker
              try {
                 ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Ticker Generic");
                 request.appendParam({
@@ -208,7 +265,6 @@ public:
                                     d.Parse(body.c_str());
                                     if (!d.HasParseError() && d.IsObject() && d.HasMember("result")) {
                                         auto result = d["result"].GetObject();
-                                        // The key in result is the pair name, might differ from symbol. Iterating first key.
                                         if (result.MemberCount() > 0) {
                                             auto pairData = result.MemberBegin()->value.GetObject();
                                             if (pairData.HasMember("b")) { ticker.bidPrice = std::stod(pairData["b"].GetArray()[0].GetString()); }
@@ -336,7 +392,7 @@ public:
                                         auto tick = d["tick"].GetObject();
                                         if (tick.HasMember("bid")) ticker.bidPrice = tick["bid"].GetArray()[0].GetDouble();
                                         if (tick.HasMember("ask")) ticker.askPrice = tick["ask"].GetArray()[0].GetDouble();
-                                        if (tick.HasMember("close")) ticker.lastPrice = tick["close"].GetDouble(); // Huobi uses 'close' as last
+                                        if (tick.HasMember("close")) ticker.lastPrice = tick["close"].GetDouble();
                                         foundData = true;
                                     }
                                 }
@@ -347,17 +403,11 @@ public:
              } catch(...) {}
         }
         else if (exchangeName_ == "kraken-futures") {
-             // Kraken Futures Ticker (Generic)
              try {
-                // Endpoint: /api/v3/tickers?symbol=pf_xbtusd ??
-                // Actually Kraken Futures API is /derivatives/api/v3/tickers
-                // CCAPI uses https://futures.kraken.com
-                // Path: /derivatives/api/v3/tickers
                 ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Ticker Generic");
                 request.appendParam({
                     {"HTTP_METHOD", "GET"},
-                    {"HTTP_PATH", "/derivatives/api/v3/tickers"},
-                    // {"HTTP_QUERY_STRING", "symbol=" + symbol} // Returns all if no symbol, or specific.
+                    {"HTTP_PATH", "/derivatives/api/v3/tickers"}
                 });
                 auto events = sendRequestSync(request);
                 for (const auto& event : events) {
@@ -370,13 +420,172 @@ public:
                                     d.Parse(body.c_str());
                                     if (!d.HasParseError() && d.IsObject() && d.HasMember("tickers")) {
                                         for (const auto& t : d["tickers"].GetArray()) {
-                                            if (std::string(t["symbol"].GetString()) == symbol || symbol.empty()) { // Loose match
+                                            if (std::string(t["symbol"].GetString()) == symbol) {
                                                 if (t.HasMember("bid")) ticker.bidPrice = t["bid"].GetDouble();
                                                 if (t.HasMember("ask")) ticker.askPrice = t["ask"].GetDouble();
                                                 if (t.HasMember("last")) ticker.lastPrice = t["last"].GetDouble();
                                                 foundData = true;
                                                 break;
                                             }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+             } catch(...) {}
+        }
+        else if (exchangeName_ == "bitfinex") {
+             try {
+                ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Ticker Generic");
+                request.appendParam({
+                    {"HTTP_METHOD", "GET"},
+                    {"HTTP_PATH", "/v2/ticker/" + symbol}
+                });
+                auto events = sendRequestSync(request);
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            for (const auto& element : message.getElementList()) {
+                                if (element.getNameValueMap().count("HTTP_BODY")) {
+                                    std::string body = element.getNameValueMap().at("HTTP_BODY");
+                                    rapidjson::Document d;
+                                    d.Parse(body.c_str());
+                                    if (!d.HasParseError() && d.IsArray() && d.Size() >= 10) {
+                                        auto arr = d.GetArray();
+                                        ticker.bidPrice = arr[0].GetDouble();
+                                        ticker.bidSize = arr[1].GetDouble();
+                                        ticker.askPrice = arr[2].GetDouble();
+                                        ticker.askSize = arr[3].GetDouble();
+                                        ticker.lastPrice = arr[6].GetDouble();
+                                        foundData = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+             } catch(...) {}
+        }
+        else if (exchangeName_ == "ascendex") {
+             try {
+                ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Ticker Generic");
+                request.appendParam({
+                    {"HTTP_METHOD", "GET"},
+                    {"HTTP_PATH", "/api/pro/v1/ticker"},
+                    {"HTTP_QUERY_STRING", "symbol=" + symbol}
+                });
+                auto events = sendRequestSync(request);
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            for (const auto& element : message.getElementList()) {
+                                if (element.getNameValueMap().count("HTTP_BODY")) {
+                                    std::string body = element.getNameValueMap().at("HTTP_BODY");
+                                    rapidjson::Document d;
+                                    d.Parse(body.c_str());
+                                    if (!d.HasParseError() && d.IsObject() && d.HasMember("data")) {
+                                        auto data = d["data"].GetObject();
+                                        if (data.HasMember("bid") && data["bid"].IsArray()) ticker.bidPrice = std::stod(data["bid"].GetArray()[0].GetString());
+                                        if (data.HasMember("ask") && data["ask"].IsArray()) ticker.askPrice = std::stod(data["ask"].GetArray()[0].GetString());
+                                        if (data.HasMember("close")) ticker.lastPrice = std::stod(data["close"].GetString());
+                                        foundData = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+             } catch(...) {}
+        }
+        else if (exchangeName_ == "bybit") {
+             try {
+                ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Ticker Generic");
+                request.appendParam({
+                    {"HTTP_METHOD", "GET"},
+                    {"HTTP_PATH", "/v5/market/tickers"},
+                    {"HTTP_QUERY_STRING", "category=spot&symbol=" + symbol}
+                });
+                auto events = sendRequestSync(request);
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            for (const auto& element : message.getElementList()) {
+                                if (element.getNameValueMap().count("HTTP_BODY")) {
+                                    std::string body = element.getNameValueMap().at("HTTP_BODY");
+                                    rapidjson::Document d;
+                                    d.Parse(body.c_str());
+                                    if (!d.HasParseError() && d.IsObject() && d.HasMember("result")) {
+                                        auto list = d["result"]["list"].GetArray();
+                                        if (list.Size() > 0) {
+                                            const auto& item = list[0];
+                                            if (item.HasMember("bid1Price")) ticker.bidPrice = std::stod(item["bid1Price"].GetString());
+                                            if (item.HasMember("ask1Price")) ticker.askPrice = std::stod(item["ask1Price"].GetString());
+                                            if (item.HasMember("lastPrice")) ticker.lastPrice = std::stod(item["lastPrice"].GetString());
+                                            foundData = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+             } catch(...) {}
+        }
+        else if (exchangeName_ == "mexc" || exchangeName_ == "mexc-futures") {
+             try {
+                ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Ticker Generic");
+                request.appendParam({
+                    {"HTTP_METHOD", "GET"},
+                    {"HTTP_PATH", "/api/v3/ticker/bookTicker"},
+                    {"HTTP_QUERY_STRING", "symbol=" + symbol}
+                });
+                auto events = sendRequestSync(request);
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            for (const auto& element : message.getElementList()) {
+                                if (element.getNameValueMap().count("HTTP_BODY")) {
+                                    std::string body = element.getNameValueMap().at("HTTP_BODY");
+                                    rapidjson::Document d;
+                                    d.Parse(body.c_str());
+                                    if (!d.HasParseError() && d.IsObject()) {
+                                        if (d.HasMember("bidPrice")) ticker.bidPrice = std::stod(d["bidPrice"].GetString());
+                                        if (d.HasMember("askPrice")) ticker.askPrice = std::stod(d["askPrice"].GetString());
+                                        foundData = true;
+                                        ticker.lastPrice = (ticker.bidPrice + ticker.askPrice) / 2.0;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+             } catch(...) {}
+        }
+        else if (exchangeName_ == "whitebit") {
+             try {
+                ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Ticker Generic");
+                request.appendParam({
+                    {"HTTP_METHOD", "GET"},
+                    {"HTTP_PATH", "/api/v4/public/ticker"},
+                });
+                auto events = sendRequestSync(request);
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            for (const auto& element : message.getElementList()) {
+                                if (element.getNameValueMap().count("HTTP_BODY")) {
+                                    std::string body = element.getNameValueMap().at("HTTP_BODY");
+                                    rapidjson::Document d;
+                                    d.Parse(body.c_str());
+                                    if (!d.HasParseError() && d.IsObject()) {
+                                        if (d.HasMember(symbol.c_str())) {
+                                            auto obj = d[symbol.c_str()].GetObject();
+                                            if (obj.HasMember("bid")) ticker.bidPrice = std::stod(obj["bid"].GetString());
+                                            if (obj.HasMember("ask")) ticker.askPrice = std::stod(obj["ask"].GetString());
+                                            if (obj.HasMember("last")) ticker.lastPrice = std::stod(obj["last"].GetString());
+                                            foundData = true;
                                         }
                                     }
                                 }
@@ -401,12 +610,9 @@ public:
                         ticker.timestamp = message.getTimeISO();
                         for (const auto& element : message.getElementList()) {
                             const auto& map = element.getNameValueMap();
-
-                            // Filter by instrument if present (GET_BBOS on Binance returns all tickers)
                             if (map.count("INSTRUMENT") && map.at("INSTRUMENT") != symbol) {
                                 continue;
                             }
-
                             if (map.count("BID_PRICE")) { ticker.bidPrice = std::stod(map.at("BID_PRICE")); foundData = true; }
                             if (map.count("BID_SIZE")) ticker.bidSize = std::stod(map.at("BID_SIZE"));
                             if (map.count("ASK_PRICE")) { ticker.askPrice = std::stod(map.at("ASK_PRICE")); foundData = true; }
@@ -421,7 +627,7 @@ public:
             std::cerr << "Warning: No Ticker data found in response for " << symbol << " on " << exchangeName_ << std::endl;
         }
 
-        if (ticker.bidPrice > 0 && ticker.askPrice > 0) {
+        if (ticker.lastPrice == 0.0 && ticker.bidPrice > 0 && ticker.askPrice > 0) {
             ticker.lastPrice = (ticker.bidPrice + ticker.askPrice) / 2.0;
         }
 
@@ -429,7 +635,6 @@ public:
     }
 
     std::vector<OHLCV> fetchOHLCV(const std::string& symbol, const std::string& timeframe = "60", int limit = 100) {
-        // timeframe in seconds for CCAPI standard, usually.
         ccapi::Request request(ccapi::Request::Operation::GET_RECENT_CANDLESTICKS, exchangeName_, symbol);
         request.appendParam({
             {"CANDLESTICK_INTERVAL_SECONDS", timeframe},
@@ -486,40 +691,20 @@ public:
                         trade.symbol = symbol;
                         if (map.count("TRADE_ID")) trade.id = map.at("TRADE_ID");
                         if (map.count("LAST_PRICE")) trade.price = std::stod(map.at("LAST_PRICE"));
-                        else if (map.count("PRICE")) trade.price = std::stod(map.at("PRICE")); // some exchanges might use PRICE
+                        else if (map.count("PRICE")) trade.price = std::stod(map.at("PRICE"));
 
                         if (map.count("LAST_SIZE")) trade.size = std::stod(map.at("LAST_SIZE"));
                         else if (map.count("SIZE")) trade.size = std::stod(map.at("SIZE"));
 
                         if (map.count("IS_BUYER_MAKER")) {
                             trade.isBuyerMaker = map.at("IS_BUYER_MAKER") == "1" || map.at("IS_BUYER_MAKER") == "true";
-                            // Usually: Buyer is Maker -> Sell side trade (aggressor is seller) -> Price goes down
-                            // Buyer is Taker -> Buy side trade (aggressor is buyer) -> Price goes up
-                            // Standard CCXT: side is the taker's side.
-                            // If isBuyerMaker is true (1), buyer is maker, so seller is taker -> "sell"
-                            // If isBuyerMaker is false (0), buyer is taker -> "buy"
                             trade.side = trade.isBuyerMaker ? "sell" : "buy";
                         } else {
                             trade.side = "unknown";
                         }
 
-                        // Timestamps
-                        // CCAPI messages have `time` (exchange time) and `timeReceived`.
-                        // We use the timestamp from the message itself if available (element specific?)
-                        // Usually trades have a timestamp in element.
-                        // CCAPI normalizes it?
-                        // Let's use message timestamp as fallback or specific field.
-                        // Some exchanges provide "TIMESTAMP" in element.
-                        // But CCAPI message has `getTimeISO()`.
-                        // Since multiple trades can be in one message or one trade per message?
-                        // GET_RECENT_TRADES usually returns a list of elements in one message.
-                        // Each element might NOT have a timestamp if it's shared.
-                        // However, trades usually have individual timestamps.
-                        // CCAPI param `GET_RECENT_TRADES` doc example shows `LAST_PRICE`, `LAST_SIZE`, `TRADE_ID`, `IS_BUYER_MAKER`.
-                        // Does it show timestamp?
-                        // Let's look for "TIMESTAMP" or "TIME" in map.
                         if (map.count("TIMESTAMP")) trade.timestamp = map.at("TIMESTAMP");
-                        else trade.timestamp = message.getTimeISO(); // Fallback
+                        else trade.timestamp = message.getTimeISO();
 
                         trades.push_back(trade);
                     }
@@ -529,7 +714,6 @@ public:
         return trades;
     }
 
-    // Experimental: Fetch Instruments (may vary heavily by exchange)
     std::vector<Instrument> fetchInstruments() {
         ccapi::Request request(ccapi::Request::Operation::GET_INSTRUMENTS, exchangeName_);
 
@@ -540,8 +724,6 @@ public:
             if (event.getType() == ccapi::Event::Type::RESPONSE) {
                 for (const auto& message : event.getMessageList()) {
                      if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                        // Some exchanges might not support GET_INSTRUMENTS or need specific implementation.
-                        // Just return empty or log.
                         std::cerr << "Warning: GET_INSTRUMENTS failed: " << message.toString() << std::endl;
                         continue;
                     }
@@ -565,7 +747,6 @@ public:
         orderBook.symbol = symbol;
 
         if (exchangeName_ == "coinbase") {
-             // Coinbase specific via Generic Request
              ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get OrderBook Generic");
              request.appendParam({
                 {"HTTP_METHOD", "GET"},
@@ -573,7 +754,6 @@ public:
                 {"HTTP_QUERY_STRING", "level=2"}
              });
              auto events = sendRequestSync(request);
-             // Parse logic for Coinbase generic response (similar to Ticker but parsing arrays of bids/asks)
              for (const auto& event : events) {
                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
                     for (const auto& message : event.getMessageList()) {
@@ -605,7 +785,6 @@ public:
         }
         else if (exchangeName_ == "binance-us" || exchangeName_ == "binance" ||
                  exchangeName_ == "binance-usds-futures" || exchangeName_ == "binance-coin-futures") {
-             // Binance family Generic Request
              ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get OrderBook Generic");
              std::string path = "/api/v3/depth";
              if (exchangeName_.find("futures") != std::string::npos) {
@@ -724,28 +903,11 @@ public:
         else if (exchangeName_ == "gateio" || exchangeName_ == "gateio-perpetual-futures") {
              try {
                 ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get OrderBook Generic");
-                // Gateio futures might use different path (/futures/usdt/order_book etc)
-                // If it is spot, use /spot/order_book.
-                // Assuming standardized use for now or user passes "gateio" for spot.
-                // Let's rely on exchangeName check.
-                if (exchangeName_ == "gateio") {
-                    request.appendParam({
-                        {"HTTP_METHOD", "GET"},
-                        {"HTTP_PATH", "/spot/order_book"},
-                        {"HTTP_QUERY_STRING", "currency_pair=" + symbol + "&limit=" + std::to_string(limit)}
-                    });
-                } else {
-                    // Futures: e.g. /futures/usdt/order_book?contract=BTC_USDT
-                    // Need to know if usdt or btc delivery. CCAPI usually handles this.
-                    // For now, fallback generic only on spot gateio.
-                    // Let's just use the existing logic for "gateio" string match and expand if needed.
-                    request.appendParam({
-                        {"HTTP_METHOD", "GET"},
-                        {"HTTP_PATH", "/spot/order_book"},
-                        {"HTTP_QUERY_STRING", "currency_pair=" + symbol + "&limit=" + std::to_string(limit)}
-                    });
-                }
-
+                request.appendParam({
+                    {"HTTP_METHOD", "GET"},
+                    {"HTTP_PATH", "/spot/order_book"},
+                    {"HTTP_QUERY_STRING", "currency_pair=" + symbol + "&limit=" + std::to_string(limit)}
+                });
                 auto events = sendRequestSync(request);
                 for (const auto& event : events) {
                     if (event.getType() == ccapi::Event::Type::RESPONSE) {
@@ -870,6 +1032,229 @@ public:
                                         }
                                         if (tick.HasMember("asks") && tick["asks"].IsArray()) {
                                             for (const auto& a : tick["asks"].GetArray()) {
+                                                orderBook.asks.push_back({a[0].GetDouble(), a[1].GetDouble()});
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+             } catch(...) {}
+        }
+        else if (exchangeName_ == "bitfinex") {
+             try {
+                ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get OrderBook Generic");
+                request.appendParam({
+                    {"HTTP_METHOD", "GET"},
+                    {"HTTP_PATH", "/v2/book/" + symbol + "/P0"}
+                });
+                auto events = sendRequestSync(request);
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            for (const auto& element : message.getElementList()) {
+                                if (element.getNameValueMap().count("HTTP_BODY")) {
+                                    std::string body = element.getNameValueMap().at("HTTP_BODY");
+                                    rapidjson::Document d;
+                                    d.Parse(body.c_str());
+                                    if (!d.HasParseError() && d.IsArray()) {
+                                        for (const auto& item : d.GetArray()) {
+                                            auto entry = item.GetArray();
+                                            double price = entry[0].GetDouble();
+                                            double count = entry[1].GetDouble();
+                                            double amount = entry[2].GetDouble();
+                                            if (count > 0) {
+                                                if (amount > 0) orderBook.bids.push_back({price, amount});
+                                                else orderBook.asks.push_back({price, -amount});
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+             } catch(...) {}
+        }
+        else if (exchangeName_ == "ascendex") {
+             try {
+                ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get OrderBook Generic");
+                request.appendParam({
+                    {"HTTP_METHOD", "GET"},
+                    {"HTTP_PATH", "/api/pro/v1/depth"},
+                    {"HTTP_QUERY_STRING", "symbol=" + symbol}
+                });
+                auto events = sendRequestSync(request);
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            for (const auto& element : message.getElementList()) {
+                                if (element.getNameValueMap().count("HTTP_BODY")) {
+                                    std::string body = element.getNameValueMap().at("HTTP_BODY");
+                                    rapidjson::Document d;
+                                    d.Parse(body.c_str());
+                                    if (!d.HasParseError() && d.IsObject() && d.HasMember("data")) {
+                                        if (d["data"].HasMember("data")) {
+                                            auto innerData = d["data"]["data"].GetObject();
+                                            if (innerData.HasMember("bids")) {
+                                                for (const auto& b : innerData["bids"].GetArray()) {
+                                                    orderBook.bids.push_back({std::stod(b.GetArray()[0].GetString()), std::stod(b.GetArray()[1].GetString())});
+                                                }
+                                            }
+                                            if (innerData.HasMember("asks")) {
+                                                for (const auto& a : innerData["asks"].GetArray()) {
+                                                    orderBook.asks.push_back({std::stod(a.GetArray()[0].GetString()), std::stod(a.GetArray()[1].GetString())});
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+             } catch(...) {}
+        }
+        else if (exchangeName_ == "bybit") {
+             try {
+                ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get OrderBook Generic");
+                request.appendParam({
+                    {"HTTP_METHOD", "GET"},
+                    {"HTTP_PATH", "/v5/market/orderbook"},
+                    {"HTTP_QUERY_STRING", "category=spot&symbol=" + symbol}
+                });
+                auto events = sendRequestSync(request);
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            for (const auto& element : message.getElementList()) {
+                                if (element.getNameValueMap().count("HTTP_BODY")) {
+                                    std::string body = element.getNameValueMap().at("HTTP_BODY");
+                                    rapidjson::Document d;
+                                    d.Parse(body.c_str());
+                                    if (!d.HasParseError() && d.IsObject() && d.HasMember("result")) {
+                                        auto res = d["result"].GetObject();
+                                        if (res.HasMember("b")) {
+                                            for (const auto& b : res["b"].GetArray()) {
+                                                orderBook.bids.push_back({std::stod(b.GetArray()[0].GetString()), std::stod(b.GetArray()[1].GetString())});
+                                            }
+                                        }
+                                        if (res.HasMember("a")) {
+                                            for (const auto& a : res["a"].GetArray()) {
+                                                orderBook.asks.push_back({std::stod(a.GetArray()[0].GetString()), std::stod(a.GetArray()[1].GetString())});
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+             } catch(...) {}
+        }
+        else if (exchangeName_ == "mexc") {
+             try {
+                ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get OrderBook Generic");
+                request.appendParam({
+                    {"HTTP_METHOD", "GET"},
+                    {"HTTP_PATH", "/api/v3/depth"},
+                    {"HTTP_QUERY_STRING", "symbol=" + symbol}
+                });
+                auto events = sendRequestSync(request);
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            for (const auto& element : message.getElementList()) {
+                                if (element.getNameValueMap().count("HTTP_BODY")) {
+                                    std::string body = element.getNameValueMap().at("HTTP_BODY");
+                                    rapidjson::Document d;
+                                    d.Parse(body.c_str());
+                                    if (!d.HasParseError() && d.IsObject()) {
+                                        if (d.HasMember("bids")) {
+                                            for (const auto& b : d["bids"].GetArray()) {
+                                                orderBook.bids.push_back({std::stod(b.GetArray()[0].GetString()), std::stod(b.GetArray()[1].GetString())});
+                                            }
+                                        }
+                                        if (d.HasMember("asks")) {
+                                            for (const auto& a : d["asks"].GetArray()) {
+                                                orderBook.asks.push_back({std::stod(a.GetArray()[0].GetString()), std::stod(a.GetArray()[1].GetString())});
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+             } catch(...) {}
+        }
+        else if (exchangeName_ == "cryptocom") {
+             try {
+                ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get OrderBook Generic");
+                request.appendParam({
+                    {"HTTP_METHOD", "GET"},
+                    {"HTTP_PATH", "/v2/public/get-book"},
+                    {"HTTP_QUERY_STRING", "instrument_name=" + symbol}
+                });
+                auto events = sendRequestSync(request);
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            for (const auto& element : message.getElementList()) {
+                                if (element.getNameValueMap().count("HTTP_BODY")) {
+                                    std::string body = element.getNameValueMap().at("HTTP_BODY");
+                                    rapidjson::Document d;
+                                    d.Parse(body.c_str());
+                                    if (!d.HasParseError() && d.IsObject() && d.HasMember("result") && d["result"].HasMember("data")) {
+                                        if (d["result"]["data"].IsObject()) {
+                                            auto book = d["result"]["data"].GetObject();
+                                            if (book.HasMember("bids")) {
+                                                for (const auto& b : book["bids"].GetArray()) {
+                                                    orderBook.bids.push_back({b[0].GetDouble(), b[1].GetDouble()});
+                                                }
+                                            }
+                                            if (book.HasMember("asks")) {
+                                                for (const auto& a : book["asks"].GetArray()) {
+                                                    orderBook.asks.push_back({a[0].GetDouble(), a[1].GetDouble()});
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+             } catch(...) {}
+        }
+        else if (exchangeName_ == "deribit") {
+             try {
+                ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get OrderBook Generic");
+                request.appendParam({
+                    {"HTTP_METHOD", "GET"},
+                    {"HTTP_PATH", "/public/get_order_book"},
+                    {"HTTP_QUERY_STRING", "instrument_name=" + symbol}
+                });
+                auto events = sendRequestSync(request);
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            for (const auto& element : message.getElementList()) {
+                                if (element.getNameValueMap().count("HTTP_BODY")) {
+                                    std::string body = element.getNameValueMap().at("HTTP_BODY");
+                                    rapidjson::Document d;
+                                    d.Parse(body.c_str());
+                                    if (!d.HasParseError() && d.IsObject() && d.HasMember("result")) {
+                                        auto res = d["result"].GetObject();
+                                        if (res.HasMember("bids")) {
+                                            for (const auto& b : res["bids"].GetArray()) {
+                                                orderBook.bids.push_back({b[0].GetDouble(), b[1].GetDouble()});
+                                            }
+                                        }
+                                        if (res.HasMember("asks")) {
+                                            for (const auto& a : res["asks"].GetArray()) {
                                                 orderBook.asks.push_back({a[0].GetDouble(), a[1].GetDouble()});
                                             }
                                         }

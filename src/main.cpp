@@ -119,6 +119,21 @@ int main() {
         // {"binance-usds-futures", "BTCUSDT"}, // Geo-blocked in US/Sandbox
         // {"kraken-futures", "pf_xbtusd"}, // Network timeouts in Sandbox
         {"gateio-perpetual-futures", "BTC_USDT"},
+        {"ascendex", "BTC/USDT"},
+        {"bitfinex", "tBTCUSD"},
+        {"bitget", "BTCUSDT"},
+        {"bitmart", "BTC_USDT"},
+        {"bitmex", "XBTUSD"},
+        {"bybit", "BTCUSDT"},
+        {"cryptocom", "BTC_USDT"},
+        {"deribit", "BTC-PERPETUAL"},
+        {"erisx", "BTC/USD"},
+        {"mexc", "BTCUSDT"}, // Mexc V3 uses BTCUSDT
+        {"whitebit", "BTC_USDT"},
+        // Futures variants
+        {"bitget-futures", "BTCUSDT_UMCBL"}, // Example symbol? Needs verification
+        {"kucoin-futures", "XBTUSDTM"},
+        {"mexc-futures", "BTC_USDT"},
     };
 
     for (const auto& target : targets) {

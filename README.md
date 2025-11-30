@@ -1,114 +1,103 @@
-# Unified Crypto Wrapper
+# Unified CCAPI Wrapper
 
-A standardized C++ wrapper for the [CCAPI](https://github.com/crypto-chassis/ccapi) library, inspired by the simplicity of CCXT. This wrapper provides a uniform interface for public and private APIs across different exchanges, handling specific quirks internally (e.g., Binance vs Coinbase).
+Un wrapper C++ header-only normalisé pour la bibliothèque [Crypto-Chassis CCAPI](https://github.com/crypto-chassis/ccapi), conçu pour offrir une expérience développeur similaire à CCXT (interface unique, simple et unifiée) tout en conservant la performance du C++.
 
-## Features
+## Fonctionnalités
 
-- **Unified Interface**: Same method calls for all exchanges (`fetchTicker`, `fetchOrderBook`, `createOrder`, etc.).
-- **Header-Only**: Easy integration (uses CCAPI which is header-only).
-- **Public API Normalization**:
-  - `fetchTicker`: Handles exchanges with missing `GET_BBOS` (e.g., Coinbase) via generic requests.
-  - `fetchOrderBook`: Handles parameter differences and bugs (e.g., BinanceUS `limit` param, Coinbase endpoint).
-  - `fetchOHLCV`: Standardized candlestick retrieval.
-- **Private API Support**:
-  - `createOrder`: Unified parameters for placing orders.
-  - `fetchBalance`: Unified balance retrieval.
-- **Quirk Handling**:
-  - Automatically uses `GENERIC_PUBLIC_REQUEST` when native CCAPI implementation is missing or buggy for specific operations on specific exchanges.
-  - Handles response correlation and synchronous waiting robustly.
+Ce wrapper normalise les appels API REST publics et privés pour une multitude d'exchanges. Il gère en interne les spécificités ("quirks") de chaque plateforme (ex: format des tickers, structure du carnet d'ordres) pour exposer des structures de données C++ standards.
 
-## Dependencies
+### Méthodes Supportées
 
-- **C++17** compatible compiler.
-- **OpenSSL**: Required by CCAPI.
-- **Boost** (headers only): `system`, `asio`, `beast`, etc.
-- **RapidJSON** (headers only): Included in `external/include` if not present.
-- **CCAPI**: Included in `external/ccapi`.
+Toutes les méthodes sont synchrones et bloquantes (via polling interne) pour une simplicité d'utilisation maximale.
 
-## Build Instructions
+*   **Public**:
+    *   `Ticker fetchTicker(symbol)` : Prix, Bid, Ask, Volume.
+    *   `OrderBook fetchOrderBook(symbol, limit)` : Carnet d'ordres normalisé (bids/asks).
+    *   `vector<Trade> fetchTrades(symbol, limit)` : Derniers trades.
+    *   `vector<OHLCV> fetchOHLCV(symbol, timeframe)` : Bougies (Candlesticks).
+    *   `vector<Instrument> fetchInstruments()` : Liste des paires disponibles.
 
-1. **Clone the repository** (with submodules if any, or ensure `external/` is populated):
-   ```bash
-   git clone <repo_url>
-   cd <repo_directory>
-   ```
+*   **Privé** (Nécessite API Key) :
+    *   `string createOrder(symbol, side, amount, price)` : Création d'ordre (Limit ou Market).
+    *   `map<string, double> fetchBalance()` : Solde des comptes.
 
-2. **Build with CMake**:
-   ```bash
-   mkdir build && cd build
-   cmake ..
-   make
-   ```
+## Exchanges Supportés & Testés
 
-3. **Run Test**:
-   ```bash
-   ./test_wrapper
-   ```
+| Exchange | Ticker | OrderBook | Trades | Remarques |
+|----------|--------|-----------|--------|-----------|
+| **Binance US** | ✅ | ✅ | ✅ | Via Generic Fallback |
+| **Coinbase** | ✅ | ✅ | ✅ | Via Generic Fallback |
+| **Kraken** | ✅ | ✅ | ✅ | |
+| **Kucoin** | ✅ | ✅ | ✅ | |
+| **Huobi** | ✅ | ✅ | ✅ | |
+| **Bitstamp** | ✅ | ✅ | ✅ | |
+| **Gemini** | ✅ | ✅ | ✅ | |
+| **OKX** | ✅ | ✅ | ✅ | |
+| **Mexc** | ✅ | ✅ | ✅ | |
+| **Bitfinex** | ✅ | ✅ | ✅ | |
+| **AscendEx** | ✅ | ✅ | ✅ | |
+| **Gate.io** | ✅ | ⚠️ | ✅ | Book vide parfois |
+| **Bitget** | ✅ | ❌ | ✅ | |
 
-## Usage Example
+*(Note: Binance Global et Bitmex sont supportés par le code mais souvent bloqués par IP dans les environnements cloud/sandbox)*.
 
-### Public API
+## Dépendances
+
+Le projet est autonome mais dépend de bibliothèques header-only téléchargées dans `external/include` :
+*   **CCAPI** (Crypto-Chassis)
+*   **Boost** (Asio, Beast...)
+*   **RapidJSON**
+*   **OpenSSL** (Doit être installé sur le système)
+
+## Compilation
+
+```bash
+mkdir build && cd build
+cmake ..
+make
+```
+
+## Exemple d'Utilisation
 
 ```cpp
-#include "UnifiedExchange.hpp"
+#include "src/UnifiedExchange.hpp"
 #include <iostream>
 
 using namespace unified_crypto;
 
 int main() {
+    // 1. Initialisation (Public)
+    UnifiedExchange exchange("coinbase");
+
+    // 2. Récupération du Ticker
     try {
-        // Initialize Exchange (e.g., "binance-us", "coinbase")
-        UnifiedExchange exchange("binance-us");
-
-        // Fetch Ticker
-        Ticker ticker = exchange.fetchTicker("BTCUSDT");
-        std::cout << "Ticker: Bid=" << ticker.bidPrice << " Ask=" << ticker.askPrice << std::endl;
-
-        // Fetch Order Book
-        OrderBook book = exchange.fetchOrderBook("BTCUSDT", 5);
-        std::cout << "Top Bid: " << book.bids[0].price << std::endl;
-
-        // Fetch OHLCV
-        auto candles = exchange.fetchOHLCV("BTCUSDT", "60", 5);
-        if(!candles.empty()) {
-            std::cout << "Last Close: " << candles[0].close << std::endl;
-        }
-
+        Ticker t = exchange.fetchTicker("BTC-USD");
+        std::cout << "BTC/USD: " << t.lastPrice << " (Bid: " << t.bidPrice << ")" << std::endl;
     } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+        std::cerr << "Erreur: " << e.what() << std::endl;
     }
+
+    // 3. Initialisation (Privé)
+    ExchangeConfig config;
+    config.apiKey = "VOTRE_KEY";
+    config.apiSecret = "VOTRE_SECRET";
+    // config.passphrase = "VOTRE_PASSPHRASE"; // Si requis (ex: Kucoin, Coinbase Pro)
+
+    UnifiedExchange privateExchange("binance-us", config);
+
+    // 4. Création d'un ordre
+    // privateExchange.createOrder("BTCUSDT", "BUY", 0.001); // Market Order
+
     return 0;
 }
 ```
 
-### Private API
+## Structure du Code
 
-To use private methods, provide an `ExchangeConfig` with API keys.
+*   `src/UnifiedExchange.hpp` : **Le Coeur du projet**. Contient toute la logique, les classes, et la gestion des cas particuliers (Generic Requests).
+*   `src/main.cpp` : Harnais de test itérant sur tous les exchanges.
 
-```cpp
-ExchangeConfig config;
-config.apiKey = "YOUR_API_KEY";
-config.apiSecret = "YOUR_API_SECRET";
-// config.passphrase = "YOUR_PASSPHRASE"; // For Coinbase, OKX, etc.
+## Architecture "Generic Request"
 
-UnifiedExchange exchange("binance-us", config);
-
-// Check Balance
-auto balances = exchange.fetchBalance();
-std::cout << "USDT Balance: " << balances["USDT"] << std::endl;
-
-// Place Limit Order
-std::string orderId = exchange.createOrder("BTCUSDT", "BUY", 0.001, 50000.0);
-std::cout << "Order Placed: " << orderId << std::endl;
-```
-
-## Supported Exchanges (Verified)
-
-- **BinanceUS** (`binance-us`): Full support (Ticker, OrderBook, OHLCV, Private).
-- **Coinbase** (`coinbase`): Full support (Ticker, OrderBook via generic fallback).
-- **Binance** (`binance`): Supported but requires non-US IP (Geo-blocked in some environments).
-- *Others*: The wrapper is built on CCAPI, so other exchanges supported by CCAPI (Kraken, OKX, etc.) should work for standard operations, provided `GET_BBOS` and `GET_MARKET_DEPTH` are supported natively. If not, the `GENERIC_PUBLIC_REQUEST` pattern demonstrated for Coinbase can be extended.
-
-## Streaming (Future Work)
-
-Currently, the wrapper focuses on a robust REST-like interface (`fetch...`). CCAPI natively supports streaming. A future update could expose `subscribeTicker` and `subscribeOrderBook` using a similar unified callback mechanism, handling quirks like "quiet" markets (no data pushed until trade) by managing local state.
+Certains exchanges (comme Coinbase ou Binance US sur certains endpoints) ne répondent pas correctement aux macros standards de CCAPI (`GET_BBOS`, etc.) dans certaines versions ou configurations.
+Pour garantir la fiabilité, ce wrapper implémente un système de fallback : si l'exchange est connu pour être "difficile", le wrapper construit manuellement une requête HTTP (`GENERIC_PUBLIC_REQUEST`) et parse le JSON brut avec RapidJSON, contournant ainsi les limitations de l'abstraction par défaut.
