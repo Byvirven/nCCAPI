@@ -10,12 +10,19 @@ Ce wrapper normalise les appels API REST publics et privés pour une multitude d
 
 Toutes les méthodes sont synchrones et bloquantes (via polling interne) pour une simplicité d'utilisation maximale.
 
-*   **Public**:
+*   **Public REST**:
     *   `Ticker fetchTicker(symbol)` : Prix, Bid, Ask, Volume.
     *   `OrderBook fetchOrderBook(symbol, limit)` : Carnet d'ordres normalisé (bids/asks).
     *   `vector<Trade> fetchTrades(symbol, limit)` : Derniers trades.
     *   `vector<OHLCV> fetchOHLCV(symbol, timeframe)` : Bougies (Candlesticks).
     *   `vector<Instrument> fetchInstruments()` : Liste des paires disponibles.
+
+*   **WebSocket**:
+    *   `subscribeTicker(symbol)`
+    *   `subscribeOrderBook(symbol, depth)`
+    *   `subscribeTrades(symbol)`
+    *   `subscribeOHLCV(symbol, interval)`
+    *   Callbacks configurables via `setOnTicker`, `setOnOrderBook`, etc.
 
 *   **Privé** (Nécessite API Key) :
     *   `string createOrder(symbol, side, amount, price)` : Création d'ordre (Limit ou Market).
@@ -95,7 +102,8 @@ int main() {
 ## Structure du Code
 
 *   `src/UnifiedExchange.hpp` : **Le Coeur du projet**. Contient toute la logique, les classes, et la gestion des cas particuliers (Generic Requests).
-*   `src/main.cpp` : Harnais de test itérant sur tous les exchanges.
+*   `src/main.cpp` : Harnais de test basique REST.
+*   `src/test_global.cpp` : Scénario de test complet (REST + WS + Rapport) pour validation finale.
 
 ## Architecture "Generic Request"
 

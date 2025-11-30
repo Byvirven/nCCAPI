@@ -1,79 +1,26 @@
-cmake_minimum_required(VERSION 3.14)
-project(UnifiedCryptoWrapper VERSION 0.1.0 LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.10)
+project(unified_ccapi_wrapper)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Dependencies
-# OpenSSL is required by CCAPI
-find_package(OpenSSL REQUIRED)
-find_package(ZLIB) # Optional but good for some exchanges
-find_package(Threads REQUIRED)
-
-# Include directories
-# CCAPI
+# Includes
 include_directories(external/ccapi/include)
-# Boost & RapidJSON
-include_directories(external/include/boost)
-include_directories(external/include)
+include_directories(external/include) # For rapidjson
+include_directories(external/include/boost) # For boost
+include_directories(src)
 
-# Enable necessary CCAPI services and exchanges
-# We can define them globally here or per target.
-# For now, we enable Market Data and Execution Management for all major exchanges.
-add_definitions(-DCCAPI_ENABLE_SERVICE_MARKET_DATA)
-add_definitions(-DCCAPI_ENABLE_SERVICE_EXECUTION_MANAGEMENT)
+# Dependencies (OpenSSL, ZLib)
+find_package(OpenSSL REQUIRED)
+find_package(ZLIB REQUIRED)
 
-# Enable specific exchanges (can be more selective to speed up build)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BINANCE)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BINANCE_US)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_COINBASE)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_KRAKEN)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_GATEIO)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_KUCOIN)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_GEMINI)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BITSTAMP)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BYBIT)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_OKX)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_HUOBI)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BINANCE_USDS_FUTURES)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BINANCE_COIN_FUTURES)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_GATEIO_PERPETUAL_FUTURES)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_ASCENDEX)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BITFINEX)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BITGET)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BITGET_FUTURES)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BITMART)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BITMEX)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_CRYPTOCOM)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_DERIBIT)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_ERISX)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_HUOBI_USDT_SWAP)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_HUOBI_COIN_SWAP)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_KRAKEN_FUTURES)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_KUCOIN_FUTURES)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_MEXC)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_MEXC_FUTURES)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_WHITEBIT)
-add_definitions(-DCCAPI_ENABLE_LOG_TRACE) # Enable logs for debugging
+# Compiler Flags
+add_compile_options(-Wall -Wextra -pthread)
 
-# Main library (header-only wrapper) interface
-add_library(unified_crypto INTERFACE)
-target_include_directories(unified_crypto INTERFACE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    external/ccapi/include
-    external/include
-)
-
-target_link_libraries(unified_crypto INTERFACE
-    OpenSSL::SSL
-    OpenSSL::Crypto
-    Threads::Threads
-)
-
-if(ZLIB_FOUND)
-    target_link_libraries(unified_crypto INTERFACE ZLIB::ZLIB)
-endif()
-
-# Test Executable
+# Test Executable (REST Wrapper Test)
 add_executable(test_wrapper src/main.cpp)
-target_link_libraries(test_wrapper PRIVATE unified_crypto)
+target_link_libraries(test_wrapper PRIVATE OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB dl pthread)
+
+# Global Test Executable (Scenario)
+add_executable(test_global src/test_global.cpp)
+target_link_libraries(test_global PRIVATE OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB dl pthread)
