@@ -15,7 +15,7 @@ find_package(OpenSSL REQUIRED)
 find_package(ZLIB REQUIRED)
 
 # Compiler Flags
-add_compile_options(-Wall -Wextra -pthread)
+add_compile_options(-Wall -Wextra -pthread -Wno-deprecated -Wno-nonnull -Wno-deprecated-declarations)
 
 # Test Executable (REST Wrapper Test)
 add_executable(test_wrapper src/main.cpp)

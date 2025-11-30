@@ -48,13 +48,21 @@ Toutes les méthodes sont synchrones et bloquantes (via polling interne) pour un
 
 *(Note: Binance Global et Bitmex sont supportés par le code mais souvent bloqués par IP dans les environnements cloud/sandbox)*.
 
-## Dépendances
+## Dépendances & Installation
 
-Le projet est autonome mais dépend de bibliothèques header-only téléchargées dans `external/include` :
-*   **CCAPI** (Crypto-Chassis)
-*   **Boost** (Asio, Beast...)
-*   **RapidJSON**
-*   **OpenSSL** (Doit être installé sur le système)
+Ce projet utilise [CCAPI](https://github.com/crypto-chassis/ccapi) comme sous-module (ou structure de répertoire équivalente).
+
+**Important :** Vous devez cloner ce dépôt avec l'option `--recursive` pour récupérer les dépendances (notamment CCAPI).
+
+```bash
+git clone --recursive <URL_DU_REPO>
+# Ou si vous avez déjà cloné :
+git submodule update --init --recursive
+```
+
+### Dépendances Externes
+*   **OpenSSL** : Doit être installé sur votre système (ex: `sudo apt install libssl-dev`).
+*   **Boost & RapidJSON** : Inclus dans `external/include` ou téléchargés automatiquement si configuré.
 
 ## Compilation
 

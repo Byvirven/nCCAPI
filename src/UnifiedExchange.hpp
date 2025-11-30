@@ -257,7 +257,8 @@ public:
     std::vector<Instrument> fetchInstruments() {
         // Generic Fallbacks for Instruments
         if (exchangeName_ == "bybit" || exchangeName_ == "gateio" || exchangeName_ == "gateio-perpetual-futures" ||
-            exchangeName_ == "deribit" || exchangeName_ == "whitebit" || exchangeName_ == "okx") {
+            exchangeName_ == "deribit" || exchangeName_ == "whitebit" || exchangeName_ == "okx" ||
+            exchangeName_ == "binance-us" || exchangeName_ == "binance") {
             return fetchInstrumentsGeneric();
         }
 
@@ -632,6 +633,8 @@ private:
              request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/spot/currency_pairs"}});
         } else if (exchangeName_ == "okx") {
              request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/v5/public/instruments"}, {"HTTP_QUERY_STRING", "instType=SPOT"}});
+        } else if (exchangeName_ == "binance-us" || exchangeName_ == "binance") {
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/v3/exchangeInfo"}});
         }
 
         auto events = sendRequestSync(request);
@@ -665,6 +668,15 @@ private:
                                      inst.symbol = i["instId"].GetString();
                                      inst.baseAsset = i["baseCcy"].GetString();
                                      inst.quoteAsset = i["quoteCcy"].GetString();
+                                     instruments.push_back(inst);
+                                 }
+                             }
+                             if ((exchangeName_ == "binance-us" || exchangeName_ == "binance") && d.HasMember("symbols")) {
+                                 for(const auto& i : d["symbols"].GetArray()) {
+                                     Instrument inst;
+                                     inst.symbol = i["symbol"].GetString();
+                                     inst.baseAsset = i["baseAsset"].GetString();
+                                     inst.quoteAsset = i["quoteAsset"].GetString();
                                      instruments.push_back(inst);
                                  }
                              }
