@@ -28,3 +28,7 @@ target_link_libraries(test_wrapper PRIVATE OpenSSL::SSL OpenSSL::Crypto ZLIB::ZL
 # Global Test Executable (Scenario)
 add_executable(test_global src/test_global.cpp)
 target_link_libraries(test_global PRIVATE OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB dl pthread ${Boost_LIBRARIES})
+
+# Geoblock Test Executable
+add_executable(test_geoblock src/test_geoblock.cpp)
+target_link_libraries(test_geoblock PRIVATE OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB dl pthread ${Boost_LIBRARIES})
