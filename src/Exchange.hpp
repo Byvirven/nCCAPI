@@ -4,7 +4,6 @@
 #include <vector>
 #include <map>
 #include <functional>
-#include "ccapi_cpp/ccapi_session.h"
 
 namespace unified_crypto {
 

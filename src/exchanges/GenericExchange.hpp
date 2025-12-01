@@ -12,7 +12,310 @@
 
 namespace unified_crypto {
 
+/**
+ * @class GenericExchange
+ * @brief A generic implementation of the Exchange interface using CCAPI.
+ *
+ * This class handles the interaction with various cryptocurrency exchanges via the CCAPI library.
+ * It supports both standard CCAPI normalized requests and "Generic" manual requests for cases
+ * where CCAPI's normalization is insufficient or incomplete for specific endpoints (e.g., Binance US OrderBook).
+ */
 class GenericExchange : public Exchange {
+private:
+    // Forward declaration of the internal event handler class
+    class GenericEventHandler;
+
+    // Member variables
+    std::string exchangeName_;          ///< Name of the exchange (e.g., "binance-us")
+    ExchangeConfig config_;             ///< API credentials
+
+    // Callbacks for WebSocket events
+    TickerCallback onTicker_;
+    OrderBookCallback onOrderBook_;
+    TradeCallback onTrade_;
+    OHLCVCallback onOHLCV_;
+
+    std::unique_ptr<GenericEventHandler> eventHandler_; ///< Handles async CCAPI events
+    std::unique_ptr<ccapi::Session> session_;           ///< Main CCAPI session
+
+    /**
+     * @brief Sends a synchronous request to the exchange and waits for the response.
+     *
+     * @param request The CCAPI request object.
+     * @return std::vector<ccapi::Event> A list of events received in response.
+     */
+    std::vector<ccapi::Event> sendRequestSync(ccapi::Request request) {
+        if (request.getCorrelationId().empty()) {
+            request.setCorrelationId(std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        }
+        std::string correlationId = request.getCorrelationId();
+        ccapi::Queue<ccapi::Event> eventQueue;
+        session_->sendRequest(request, &eventQueue);
+
+        std::vector<ccapi::Event> accumulatedEvents;
+        int timeoutMs = 15000; // 15 seconds timeout
+        int elapsed = 0;
+        bool responseReceived = false;
+
+        // Wait loop
+        while (elapsed < timeoutMs && !responseReceived) {
+            if (!eventQueue.empty()) {
+                std::vector<ccapi::Event> batch = eventQueue.purge();
+                for (const auto& event : batch) {
+                    accumulatedEvents.push_back(event);
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) responseReceived = true;
+                }
+            }
+            if (!responseReceived) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                elapsed += 10;
+            }
+        }
+        return accumulatedEvents;
+    }
+
+    // -------------------------------------------------------------------------
+    // Quirk Detection Methods
+    // These methods determine if a specific exchange requires manual handling (Generic Request)
+    // instead of the standard CCAPI normalized request.
+    // -------------------------------------------------------------------------
+
+    bool shouldUseGenericTicker() {
+        // Exchanges known to have issues with standard CCAPI Ticker fetching
+        static std::vector<std::string> quirks = {"coinbase", "okx", "cryptocom", "deribit", "kraken", "kucoin", "bitstamp", "gemini", "huobi", "bitfinex", "ascendex", "bybit", "mexc", "whitebit"};
+        return std::find(quirks.begin(), quirks.end(), exchangeName_) != quirks.end() || exchangeName_.find("mexc") != std::string::npos;
+    }
+
+    bool shouldUseGenericOrderBook() {
+        // Binance US requires manual fetching because standard CCAPI GET_MARKET_DEPTH sometimes sends malformed params
+        static std::vector<std::string> quirks = {"coinbase", "binance-us", "binance", "kraken", "kucoin", "gateio", "bitstamp", "gemini", "huobi", "bitfinex", "ascendex", "bybit", "mexc", "cryptocom", "deribit"};
+        return std::find(quirks.begin(), quirks.end(), exchangeName_) != quirks.end() || exchangeName_.find("binance") != std::string::npos || exchangeName_.find("gateio") != std::string::npos;
+    }
+
+    bool shouldUseGenericOHLCV() {
+        static std::vector<std::string> quirks = {"bybit", "gateio", "whitebit", "bitmex"};
+        return std::find(quirks.begin(), quirks.end(), exchangeName_) != quirks.end() || exchangeName_.find("gateio") != std::string::npos;
+    }
+
+    bool shouldUseGenericInstruments() {
+        static std::vector<std::string> quirks = {"bybit", "gateio", "deribit", "whitebit", "okx", "binance-us", "binance"};
+        return std::find(quirks.begin(), quirks.end(), exchangeName_) != quirks.end() || exchangeName_.find("gateio") != std::string::npos;
+    }
+
+    // -------------------------------------------------------------------------
+    // Generic Fetch Implementations
+    // -------------------------------------------------------------------------
+
+    Ticker fetchTickerGeneric(const std::string& symbol) {
+         Ticker ticker; ticker.symbol = symbol;
+         ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Ticker Generic");
+
+         // Build request params based on exchange API docs
+         if (exchangeName_ == "coinbase") {
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/products/" + symbol + "/book"}, {"HTTP_QUERY_STRING", "level=1"}});
+         } else if (exchangeName_ == "bybit") {
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/v5/market/tickers"}, {"HTTP_QUERY_STRING", "category=spot&symbol=" + symbol}});
+         } else if (exchangeName_ == "gateio" || exchangeName_.find("gateio") != std::string::npos) {
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/spot/tickers"}, {"HTTP_QUERY_STRING", "currency_pair=" + symbol}});
+         } else if (exchangeName_ == "kraken") {
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/0/public/Ticker"}, {"HTTP_QUERY_STRING", "pair=" + symbol}});
+         }
+
+         auto events = sendRequestSync(request);
+         // Parse response
+         for(const auto& event : events) {
+             for(const auto& msg : event.getMessageList()) {
+                 for(const auto& elem : msg.getElementList()) {
+                     if(elem.getNameValueMap().count("HTTP_BODY")) {
+                         rapidjson::Document d; d.Parse(elem.getNameValueMap().at("HTTP_BODY").c_str());
+                         if(!d.HasParseError()) {
+                             if(exchangeName_ == "coinbase" && d.HasMember("bids")) {
+                                 ticker.bidPrice = std::stod(d["bids"].GetArray()[0][0].GetString());
+                                 ticker.askPrice = std::stod(d["asks"].GetArray()[0][0].GetString());
+                             } else if (exchangeName_ == "bybit" && d.HasMember("result")) {
+                                 const auto& l = d["result"]["list"].GetArray()[0];
+                                 ticker.bidPrice = std::stod(l["bid1Price"].GetString());
+                                 ticker.askPrice = std::stod(l["ask1Price"].GetString());
+                                 ticker.lastPrice = std::stod(l["lastPrice"].GetString());
+                             }
+                         }
+                     }
+                 }
+             }
+         }
+         // Calculate lastPrice if missing
+         if (ticker.lastPrice == 0.0 && ticker.bidPrice > 0) ticker.lastPrice = (ticker.bidPrice + ticker.askPrice)/2.0;
+         return ticker;
+    }
+
+    OrderBook fetchOrderBookGeneric(const std::string& symbol, int limit) {
+        OrderBook ob; ob.symbol = symbol;
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Book Generic");
+
+        if (exchangeName_ == "gateio") {
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/spot/order_book"}, {"HTTP_QUERY_STRING", "currency_pair=" + symbol}});
+        } else if (exchangeName_ == "bybit") {
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/v5/market/orderbook"}, {"HTTP_QUERY_STRING", "category=spot&symbol=" + symbol}});
+        } else if (exchangeName_ == "binance-us" || exchangeName_ == "binance") {
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/v3/depth"}, {"HTTP_QUERY_STRING", "symbol=" + symbol + "&limit=" + std::to_string(limit)}});
+        }
+
+        auto events = sendRequestSync(request);
+        for(const auto& event : events) {
+            for(const auto& msg : event.getMessageList()) {
+                for(const auto& elem : msg.getElementList()) {
+                    if(elem.getNameValueMap().count("HTTP_BODY")) {
+                        rapidjson::Document d; d.Parse(elem.getNameValueMap().at("HTTP_BODY").c_str());
+                         if(!d.HasParseError()) {
+                             if(exchangeName_ == "gateio" && d.HasMember("bids")) {
+                                 for(const auto& b : d["bids"].GetArray()) ob.bids.push_back({std::stod(b[0].GetString()), std::stod(b[1].GetString())});
+                                 for(const auto& a : d["asks"].GetArray()) ob.asks.push_back({std::stod(a[0].GetString()), std::stod(a[1].GetString())});
+                             }
+                             if(exchangeName_ == "bybit" && d.HasMember("result")) {
+                                  for(const auto& b : d["result"]["b"].GetArray()) ob.bids.push_back({std::stod(b[0].GetString()), std::stod(b[1].GetString())});
+                                  for(const auto& a : d["result"]["a"].GetArray()) ob.asks.push_back({std::stod(a[0].GetString()), std::stod(a[1].GetString())});
+                             }
+                             if ((exchangeName_ == "binance-us" || exchangeName_ == "binance") && d.HasMember("bids")) {
+                                 for(const auto& b : d["bids"].GetArray()) ob.bids.push_back({std::stod(b[0].GetString()), std::stod(b[1].GetString())});
+                                 for(const auto& a : d["asks"].GetArray()) ob.asks.push_back({std::stod(a[0].GetString()), std::stod(a[1].GetString())});
+                             }
+                         }
+                    }
+                }
+            }
+        }
+        return ob;
+    }
+
+    std::vector<OHLCV> fetchOHLCVGeneric(const std::string& symbol, const std::string& timeframe, int limit) {
+         std::vector<OHLCV> candles;
+         ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get OHLCV Generic");
+
+         if (exchangeName_ == "bybit") {
+             std::string interval = "60";
+             if (timeframe == "60") interval = "1";
+             if (timeframe == "3600") interval = "60";
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/v5/market/kline"},
+                {"HTTP_QUERY_STRING", "category=spot&symbol=" + symbol + "&interval=" + interval + "&limit=" + std::to_string(limit)}});
+         } else if (exchangeName_ == "gateio" || exchangeName_.find("gateio") != std::string::npos) {
+              std::string interval = "1m";
+              if (timeframe == "60") interval = "1m";
+              if (timeframe == "3600") interval = "1h";
+              request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/spot/candlesticks"},
+                {"HTTP_QUERY_STRING", "currency_pair=" + symbol + "&interval=" + interval + "&limit=" + std::to_string(limit)}});
+         }
+
+         auto events = sendRequestSync(request);
+         for(const auto& event : events) {
+             for(const auto& msg : event.getMessageList()) {
+                 for(const auto& elem : msg.getElementList()) {
+                     if(elem.getNameValueMap().count("HTTP_BODY")) {
+                         rapidjson::Document d; d.Parse(elem.getNameValueMap().at("HTTP_BODY").c_str());
+                         if(!d.HasParseError()) {
+                             if (exchangeName_ == "bybit" && d.HasMember("result")) {
+                                 for(const auto& k : d["result"]["list"].GetArray()) {
+                                     OHLCV c;
+                                     c.timestamp = k[0].GetString();
+                                     c.open = std::stod(k[1].GetString());
+                                     c.high = std::stod(k[2].GetString());
+                                     c.low = std::stod(k[3].GetString());
+                                     c.close = std::stod(k[4].GetString());
+                                     c.volume = std::stod(k[5].GetString());
+                                     candles.push_back(c);
+                                 }
+                             }
+                             if (exchangeName_.find("gateio") != std::string::npos && d.IsArray()) {
+                                 for(const auto& k : d.GetArray()) {
+                                     OHLCV c;
+                                     c.timestamp = k[0].GetString();
+                                     c.volume = std::stod(k[1].GetString());
+                                     c.close = std::stod(k[2].GetString());
+                                     c.high = std::stod(k[3].GetString());
+                                     c.low = std::stod(k[4].GetString());
+                                     c.open = std::stod(k[5].GetString());
+                                     candles.push_back(c);
+                                 }
+                             }
+                         }
+                     }
+                 }
+             }
+         }
+         return candles;
+    }
+
+    std::vector<Instrument> fetchInstrumentsGeneric() {
+        std::vector<Instrument> instruments;
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Instruments Generic");
+
+        if (exchangeName_ == "bybit") {
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/v5/market/instruments-info"}, {"HTTP_QUERY_STRING", "category=spot"}});
+        } else if (exchangeName_ == "gateio" || exchangeName_.find("gateio") != std::string::npos) {
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/spot/currency_pairs"}});
+        } else if (exchangeName_ == "okx") {
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/v5/public/instruments"}, {"HTTP_QUERY_STRING", "instType=SPOT"}});
+        } else if (exchangeName_ == "binance-us" || exchangeName_ == "binance") {
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/v3/exchangeInfo"}});
+        }
+
+        auto events = sendRequestSync(request);
+        for(const auto& event : events) {
+             if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                 for(const auto& msg : event.getMessageList()) {
+                     if (msg.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                         std::cerr << "Generic Request Error: " << msg.toString() << std::endl;
+                         continue;
+                     }
+                     for(const auto& elem : msg.getElementList()) {
+                         if(elem.getNameValueMap().count("HTTP_BODY")) {
+                             std::string body = elem.getNameValueMap().at("HTTP_BODY");
+                             rapidjson::Document d; d.Parse(body.c_str());
+                             if(!d.HasParseError()) {
+                                 if (exchangeName_ == "bybit" && d.HasMember("result")) {
+                                     for(const auto& i : d["result"]["list"].GetArray()) {
+                                         Instrument inst;
+                                         inst.symbol = i["symbol"].GetString();
+                                         inst.baseAsset = i["baseCoin"].GetString();
+                                         inst.quoteAsset = i["quoteCoin"].GetString();
+                                         instruments.push_back(inst);
+                                     }
+                                 }
+                                 if (exchangeName_.find("gateio") != std::string::npos && d.IsArray()) {
+                                     for(const auto& i : d.GetArray()) {
+                                         Instrument inst;
+                                         inst.symbol = i["id"].GetString();
+                                         inst.baseAsset = i["base"].GetString();
+                                         inst.quoteAsset = i["quote"].GetString();
+                                         instruments.push_back(inst);
+                                     }
+                                 }
+                                 if (exchangeName_ == "okx" && d.HasMember("data")) {
+                                     for(const auto& i : d["data"].GetArray()) {
+                                         Instrument inst;
+                                         inst.symbol = i["instId"].GetString();
+                                         inst.baseAsset = i["baseCcy"].GetString();
+                                         inst.quoteAsset = i["quoteCcy"].GetString();
+                                         instruments.push_back(inst);
+                                     }
+                                 }
+                                 if ((exchangeName_ == "binance-us" || exchangeName_ == "binance") && d.HasMember("symbols")) {
+                                     for(const auto& i : d["symbols"].GetArray()) {
+                                         Instrument inst;
+                                         inst.symbol = i["symbol"].GetString();
+                                         inst.baseAsset = i["baseAsset"].GetString();
+                                         inst.quoteAsset = i["quoteAsset"].GetString();
+                                         instruments.push_back(inst);
+                                     }
+                                 }
+                             }
+                         }
+                     }
+                 }
+             }
+        }
+        return instruments;
+    }
+
 public:
     GenericExchange(const std::string& exchange, const ExchangeConfig& config = {})
         : exchangeName_(exchange), config_(config) {
@@ -254,225 +557,11 @@ public:
         return balances;
     }
 
-protected:
-    std::string exchangeName_;
-    ExchangeConfig config_;
-    TickerCallback onTicker_;
-    OrderBookCallback onOrderBook_;
-    TradeCallback onTrade_;
-    OHLCVCallback onOHLCV_;
-    std::unique_ptr<ccapi::Session> session_;
-
-    bool shouldUseGenericTicker() {
-        static std::vector<std::string> quirks = {"coinbase", "okx", "cryptocom", "deribit", "kraken", "kucoin", "bitstamp", "gemini", "huobi", "bitfinex", "ascendex", "bybit", "mexc", "whitebit"};
-        return std::find(quirks.begin(), quirks.end(), exchangeName_) != quirks.end() || exchangeName_.find("mexc") != std::string::npos;
-    }
-    bool shouldUseGenericOrderBook() {
-        static std::vector<std::string> quirks = {"coinbase", "binance-us", "binance", "kraken", "kucoin", "gateio", "bitstamp", "gemini", "huobi", "bitfinex", "ascendex", "bybit", "mexc", "cryptocom", "deribit"};
-        return std::find(quirks.begin(), quirks.end(), exchangeName_) != quirks.end() || exchangeName_.find("binance") != std::string::npos || exchangeName_.find("gateio") != std::string::npos;
-    }
-    bool shouldUseGenericOHLCV() {
-        static std::vector<std::string> quirks = {"bybit", "gateio", "whitebit", "bitmex"};
-        return std::find(quirks.begin(), quirks.end(), exchangeName_) != quirks.end() || exchangeName_.find("gateio") != std::string::npos;
-    }
-    bool shouldUseGenericInstruments() {
-        static std::vector<std::string> quirks = {"bybit", "gateio", "deribit", "whitebit", "okx", "binance-us", "binance"};
-        return std::find(quirks.begin(), quirks.end(), exchangeName_) != quirks.end() || exchangeName_.find("gateio") != std::string::npos;
-    }
-
-    Ticker fetchTickerGeneric(const std::string& symbol) {
-         Ticker ticker; ticker.symbol = symbol;
-         ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Ticker Generic");
-
-         if (exchangeName_ == "coinbase") {
-             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/products/" + symbol + "/book"}, {"HTTP_QUERY_STRING", "level=1"}});
-         } else if (exchangeName_ == "bybit") {
-             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/v5/market/tickers"}, {"HTTP_QUERY_STRING", "category=spot&symbol=" + symbol}});
-         } else if (exchangeName_ == "gateio" || exchangeName_.find("gateio") != std::string::npos) {
-             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/spot/tickers"}, {"HTTP_QUERY_STRING", "currency_pair=" + symbol}});
-         } else if (exchangeName_ == "kraken") {
-             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/0/public/Ticker"}, {"HTTP_QUERY_STRING", "pair=" + symbol}});
-         }
-
-         auto events = sendRequestSync(request);
-         for(const auto& event : events) {
-             for(const auto& msg : event.getMessageList()) {
-                 for(const auto& elem : msg.getElementList()) {
-                     if(elem.getNameValueMap().count("HTTP_BODY")) {
-                         rapidjson::Document d; d.Parse(elem.getNameValueMap().at("HTTP_BODY").c_str());
-                         if(!d.HasParseError()) {
-                             if(exchangeName_ == "coinbase" && d.HasMember("bids")) {
-                                 ticker.bidPrice = std::stod(d["bids"].GetArray()[0][0].GetString());
-                                 ticker.askPrice = std::stod(d["asks"].GetArray()[0][0].GetString());
-                             } else if (exchangeName_ == "bybit" && d.HasMember("result")) {
-                                 const auto& l = d["result"]["list"].GetArray()[0];
-                                 ticker.bidPrice = std::stod(l["bid1Price"].GetString());
-                                 ticker.askPrice = std::stod(l["ask1Price"].GetString());
-                                 ticker.lastPrice = std::stod(l["lastPrice"].GetString());
-                             }
-                         }
-                     }
-                 }
-             }
-         }
-         if (ticker.lastPrice == 0.0 && ticker.bidPrice > 0) ticker.lastPrice = (ticker.bidPrice + ticker.askPrice)/2.0;
-         return ticker;
-    }
-
-    OrderBook fetchOrderBookGeneric(const std::string& symbol, int limit) {
-        OrderBook ob; ob.symbol = symbol;
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Book Generic");
-        if (exchangeName_ == "gateio") {
-             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/spot/order_book"}, {"HTTP_QUERY_STRING", "currency_pair=" + symbol}});
-        } else if (exchangeName_ == "bybit") {
-             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/v5/market/orderbook"}, {"HTTP_QUERY_STRING", "category=spot&symbol=" + symbol}});
-        }
-
-        auto events = sendRequestSync(request);
-        for(const auto& event : events) {
-            for(const auto& msg : event.getMessageList()) {
-                for(const auto& elem : msg.getElementList()) {
-                    if(elem.getNameValueMap().count("HTTP_BODY")) {
-                        rapidjson::Document d; d.Parse(elem.getNameValueMap().at("HTTP_BODY").c_str());
-                         if(!d.HasParseError()) {
-                             if(exchangeName_ == "gateio" && d.HasMember("bids")) {
-                                 for(const auto& b : d["bids"].GetArray()) ob.bids.push_back({std::stod(b[0].GetString()), std::stod(b[1].GetString())});
-                                 for(const auto& a : d["asks"].GetArray()) ob.asks.push_back({std::stod(a[0].GetString()), std::stod(a[1].GetString())});
-                             }
-                             if(exchangeName_ == "bybit" && d.HasMember("result")) {
-                                  for(const auto& b : d["result"]["b"].GetArray()) ob.bids.push_back({std::stod(b[0].GetString()), std::stod(b[1].GetString())});
-                                  for(const auto& a : d["result"]["a"].GetArray()) ob.asks.push_back({std::stod(a[0].GetString()), std::stod(a[1].GetString())});
-                             }
-                         }
-                    }
-                }
-            }
-        }
-        return ob;
-    }
-
-    std::vector<OHLCV> fetchOHLCVGeneric(const std::string& symbol, const std::string& timeframe, int limit) {
-         std::vector<OHLCV> candles;
-         ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get OHLCV Generic");
-
-         if (exchangeName_ == "bybit") {
-             std::string interval = "60";
-             if (timeframe == "60") interval = "1";
-             if (timeframe == "3600") interval = "60";
-             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/v5/market/kline"},
-                {"HTTP_QUERY_STRING", "category=spot&symbol=" + symbol + "&interval=" + interval + "&limit=" + std::to_string(limit)}});
-         } else if (exchangeName_ == "gateio" || exchangeName_.find("gateio") != std::string::npos) {
-              std::string interval = "1m";
-              if (timeframe == "60") interval = "1m";
-              if (timeframe == "3600") interval = "1h";
-              request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/spot/candlesticks"},
-                {"HTTP_QUERY_STRING", "currency_pair=" + symbol + "&interval=" + interval + "&limit=" + std::to_string(limit)}});
-         }
-
-         auto events = sendRequestSync(request);
-         for(const auto& event : events) {
-             for(const auto& msg : event.getMessageList()) {
-                 for(const auto& elem : msg.getElementList()) {
-                     if(elem.getNameValueMap().count("HTTP_BODY")) {
-                         rapidjson::Document d; d.Parse(elem.getNameValueMap().at("HTTP_BODY").c_str());
-                         if(!d.HasParseError()) {
-                             if (exchangeName_ == "bybit" && d.HasMember("result")) {
-                                 for(const auto& k : d["result"]["list"].GetArray()) {
-                                     OHLCV c;
-                                     c.timestamp = k[0].GetString();
-                                     c.open = std::stod(k[1].GetString());
-                                     c.high = std::stod(k[2].GetString());
-                                     c.low = std::stod(k[3].GetString());
-                                     c.close = std::stod(k[4].GetString());
-                                     c.volume = std::stod(k[5].GetString());
-                                     candles.push_back(c);
-                                 }
-                             }
-                             if (exchangeName_.find("gateio") != std::string::npos && d.IsArray()) {
-                                 for(const auto& k : d.GetArray()) {
-                                     OHLCV c;
-                                     c.timestamp = k[0].GetString();
-                                     c.volume = std::stod(k[1].GetString());
-                                     c.close = std::stod(k[2].GetString());
-                                     c.high = std::stod(k[3].GetString());
-                                     c.low = std::stod(k[4].GetString());
-                                     c.open = std::stod(k[5].GetString());
-                                     candles.push_back(c);
-                                 }
-                             }
-                         }
-                     }
-                 }
-             }
-         }
-         return candles;
-    }
-
-    std::vector<Instrument> fetchInstrumentsGeneric() {
-        std::vector<Instrument> instruments;
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Instruments Generic");
-
-        if (exchangeName_ == "bybit") {
-             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/v5/market/instruments-info"}, {"HTTP_QUERY_STRING", "category=spot"}});
-        } else if (exchangeName_ == "gateio" || exchangeName_.find("gateio") != std::string::npos) {
-             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/spot/currency_pairs"}});
-        } else if (exchangeName_ == "okx") {
-             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/v5/public/instruments"}, {"HTTP_QUERY_STRING", "instType=SPOT"}});
-        } else if (exchangeName_ == "binance-us" || exchangeName_ == "binance") {
-             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/v3/exchangeInfo"}});
-        }
-
-        auto events = sendRequestSync(request);
-        for(const auto& event : events) {
-             for(const auto& msg : event.getMessageList()) {
-                 for(const auto& elem : msg.getElementList()) {
-                     if(elem.getNameValueMap().count("HTTP_BODY")) {
-                         rapidjson::Document d; d.Parse(elem.getNameValueMap().at("HTTP_BODY").c_str());
-                         if(!d.HasParseError()) {
-                             if (exchangeName_ == "bybit" && d.HasMember("result")) {
-                                 for(const auto& i : d["result"]["list"].GetArray()) {
-                                     Instrument inst;
-                                     inst.symbol = i["symbol"].GetString();
-                                     inst.baseAsset = i["baseCoin"].GetString();
-                                     inst.quoteAsset = i["quoteCoin"].GetString();
-                                     instruments.push_back(inst);
-                                 }
-                             }
-                             if (exchangeName_.find("gateio") != std::string::npos && d.IsArray()) {
-                                 for(const auto& i : d.GetArray()) {
-                                     Instrument inst;
-                                     inst.symbol = i["id"].GetString();
-                                     inst.baseAsset = i["base"].GetString();
-                                     inst.quoteAsset = i["quote"].GetString();
-                                     instruments.push_back(inst);
-                                 }
-                             }
-                             if (exchangeName_ == "okx" && d.HasMember("data")) {
-                                 for(const auto& i : d["data"].GetArray()) {
-                                     Instrument inst;
-                                     inst.symbol = i["instId"].GetString();
-                                     inst.baseAsset = i["baseCcy"].GetString();
-                                     inst.quoteAsset = i["quoteCcy"].GetString();
-                                     instruments.push_back(inst);
-                                 }
-                             }
-                             if ((exchangeName_ == "binance-us" || exchangeName_ == "binance") && d.HasMember("symbols")) {
-                                 for(const auto& i : d["symbols"].GetArray()) {
-                                     Instrument inst;
-                                     inst.symbol = i["symbol"].GetString();
-                                     inst.baseAsset = i["baseAsset"].GetString();
-                                     inst.quoteAsset = i["quoteAsset"].GetString();
-                                     instruments.push_back(inst);
-                                 }
-                             }
-                         }
-                     }
-                 }
-             }
-        }
-        return instruments;
-    }
-
+private:
+    /**
+     * @class GenericEventHandler
+     * @brief Internal class to handle asynchronous events from CCAPI.
+     */
     class GenericEventHandler : public ccapi::EventHandler {
         GenericExchange* parent_;
     public:
@@ -486,8 +575,8 @@ protected:
                              ob.timestamp = message.getTimeISO();
                              for (const auto& element : message.getElementList()) {
                                  const auto& map = element.getNameValueMap();
-                                 if (map.count("BID_PRICE")) ob.bids.push_back({std::stod(map.at("BID_PRICE")), std::stod(map.at("BID_SIZE"))});
-                                 if (map.count("ASK_PRICE")) ob.asks.push_back({std::stod(map.at("ASK_PRICE")), std::stod(map.at("ASK_SIZE"))});
+                                 if (map.count("BID_PRICE")) ob.bids.push_back(OrderBookEntry{std::stod(map.at("BID_PRICE")), std::stod(map.at("BID_SIZE"))});
+                                 if (map.count("ASK_PRICE")) ob.asks.push_back(OrderBookEntry{std::stod(map.at("ASK_PRICE")), std::stod(map.at("ASK_SIZE"))});
                              }
                              parent_->onOrderBook_(ob);
                         }
@@ -535,36 +624,6 @@ protected:
             }
         }
     };
-
-    std::unique_ptr<GenericEventHandler> eventHandler_;
-
-    std::vector<ccapi::Event> sendRequestSync(ccapi::Request request) {
-        if (request.getCorrelationId().empty()) {
-            request.setCorrelationId(std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-        }
-        std::string correlationId = request.getCorrelationId();
-        ccapi::Queue<ccapi::Event> eventQueue;
-        session_->sendRequest(request, &eventQueue);
-
-        std::vector<ccapi::Event> accumulatedEvents;
-        int timeoutMs = 15000;
-        int elapsed = 0;
-        bool responseReceived = false;
-        while (elapsed < timeoutMs && !responseReceived) {
-            if (!eventQueue.empty()) {
-                std::vector<ccapi::Event> batch = eventQueue.purge();
-                for (const auto& event : batch) {
-                    accumulatedEvents.push_back(event);
-                    if (event.getType() == ccapi::Event::Type::RESPONSE) responseReceived = true;
-                }
-            }
-            if (!responseReceived) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                elapsed += 10;
-            }
-        }
-        return accumulatedEvents;
-    }
 };
 
 }

@@ -7,14 +7,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Dependencies
 find_package(OpenSSL REQUIRED)
 find_package(ZLIB REQUIRED)
-find_package(Boost REQUIRED COMPONENTS system thread date_time)
+# find_package(Boost REQUIRED COMPONENTS system thread date_time)
 # RapidJSON is usually header-only in standard path, or use find_package/path if needed.
 # On Ubuntu, rapidjson-dev installs to /usr/include/rapidjson.
 
 # Includes
 include_directories(external/ccapi/include)
 include_directories(src)
-include_directories(${Boost_INCLUDE_DIRS})
+include_directories(external/include)
+include_directories(external/include/rapidjson/include)
+include_directories(external/include/boost)
+# include_directories(${Boost_INCLUDE_DIRS})
 # /usr/include is default, so rapidjson should be found.
 
 # Compiler Flags

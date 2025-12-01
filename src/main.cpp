@@ -88,14 +88,10 @@ void testExchange(const std::string& exchangeName, const std::string& symbol) {
     }
 }
 
-namespace ccapi {
-    Logger* Logger::logger = nullptr;
-}
-
 int main() {
     // Disable detailed logs for clean output unless needed
-    ccapi::Logger* logger = new ccapi::Logger();
-    ccapi::Logger::logger = logger;
+    // ccapi::Logger* logger = new ccapi::Logger();
+    // ccapi::Logger::logger = logger;
 
     struct ExchangeTarget {
         std::string name;
