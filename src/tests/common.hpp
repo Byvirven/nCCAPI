@@ -48,6 +48,18 @@ inline void printOHLCV(const OHLCV& c) {
               << " L=" << c.low << " C=" << c.close << " V=" << c.volume << std::endl;
 }
 
+inline void printOrder(const Order& o) {
+    std::cout << "  [Order] ID=" << o.id << " Symbol=" << o.symbol << " Side=" << o.side
+              << " Price=" << o.price << " Size=" << o.size << " Filled=" << o.filled
+              << " Status=" << o.status << " ClientID=" << o.clientOrderId
+              << " Time=" << o.timestamp << std::endl;
+}
+
+inline void printBalanceUpdate(const BalanceUpdate& b) {
+    std::cout << "  [Balance] Asset=" << b.asset << " Free=" << b.free
+              << " Locked=" << b.locked << " Time=" << b.timestamp << std::endl;
+}
+
 inline void run_exchange_test(const std::string& exchange_name, bool verbose = false) {
     std::cout << "------------------------------------------------------------" << std::endl;
     std::cout << "TESTING EXCHANGE: " << exchange_name << (verbose ? " (VERBOSE)" : "") << std::endl;
@@ -190,17 +202,19 @@ inline void run_exchange_test(const std::string& exchange_name, bool verbose = f
         std::atomic<int> updates{0};
         exchange.setOnTicker([&](const Ticker& t){
             updates++;
-            if(verbose && updates < 5) printTicker(t);
+            if(verbose) printTicker(t);
         });
         exchange.setOnOrderBook([&](const OrderBook& ob){
             updates++;
-            if(verbose && updates < 5) printOrderBook(ob);
+            if(verbose) printOrderBook(ob);
         });
         exchange.setOnOrderUpdate([&](const Order& o){
-            std::cout << "  [WS Order] ID=" << o.id << " Status=" << o.status << std::endl;
+            if(verbose) printOrder(o);
+            else std::cout << "  [WS Order] ID=" << o.id << " Status=" << o.status << std::endl;
         });
         exchange.setOnAccountUpdate([&](const BalanceUpdate& b){
-            std::cout << "  [WS Balance] Asset=" << b.asset << " Free=" << b.free << std::endl;
+            if(verbose) printBalanceUpdate(b);
+            else std::cout << "  [WS Balance] Asset=" << b.asset << " Free=" << b.free << std::endl;
         });
 
         exchange.subscribeTicker(symbol);

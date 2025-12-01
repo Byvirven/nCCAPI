@@ -78,6 +78,7 @@
     - Implémentation de fonctions de print exhaustives (`printInstrument`, `printOrderBook`, `printTrade`, `printOHLCV`) affichant tous les champs (y compris `type` SPOT/MARGIN, statuts, tick sizes, etc.).
     - Mise à jour de `Instrument` struct pour inclure le champ `type`.
     - Parsing des permissions/types dans `GenericExchange` pour Binance US.
+    - Le mode verbose affiche désormais flux complet des mises à jour WebSocket (sans limite de nombre) pour une inspection temps-réel approfondie.
 
 ## Résultats des Tests
 - Le wrapper compile et s'exécute correctement.
