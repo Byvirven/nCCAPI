@@ -12,9 +12,6 @@ namespace unified_crypto {
 class UnifiedExchange {
 public:
     UnifiedExchange(const std::string& exchange, const ExchangeConfig& config = {}) {
-        // Factory Logic
-        // Future: if (exchange == "binance") impl_ = std::make_unique<BinanceExchange>(exchange, config);
-        // Else generic
         impl_ = std::make_unique<GenericExchange>(exchange, config);
     }
 
@@ -30,8 +27,6 @@ public:
     void subscribeOrderBook(const std::string& symbol, int depth = 10) { impl_->subscribeOrderBook(symbol, depth); }
     void subscribeTrades(const std::string& symbol) { impl_->subscribeTrades(symbol); }
     void subscribeOHLCV(const std::string& symbol, const std::string& interval = "60") { impl_->subscribeOHLCV(symbol, interval); }
-
-    // WS Private
     void subscribeOrderUpdates(const std::string& symbol) { impl_->subscribeOrderUpdates(symbol); }
     void subscribeAccountUpdates() { impl_->subscribeAccountUpdates(); }
 
@@ -41,7 +36,6 @@ public:
     std::vector<OHLCV> fetchOHLCV(const std::string& symbol, const std::string& timeframe = "60", int limit = 100) { return impl_->fetchOHLCV(symbol, timeframe, limit); }
     std::vector<Instrument> fetchInstruments() { return impl_->fetchInstruments(); }
 
-    // New Proxy Methods
     Instrument fetchInstrument(const std::string& symbol) { return impl_->fetchInstrument(symbol); }
     std::vector<OHLCV> fetchOHLCVHistorical(const std::string& symbol, const std::string& timeframe, const std::string& startTime, const std::string& endTime, int limit = 1000) {
         return impl_->fetchOHLCVHistorical(symbol, timeframe, startTime, endTime, limit);
@@ -52,6 +46,9 @@ public:
     std::string sendCustomRequest(const std::string& method, const std::string& path, const std::map<std::string, std::string>& params = {}) {
         return impl_->sendCustomRequest(method, path, params);
     }
+
+    TickerStats fetchTicker24h(const std::string& symbol) { return impl_->fetchTicker24h(symbol); }
+    long long fetchServerTime() { return impl_->fetchServerTime(); }
 
     std::string createOrder(const std::string& symbol, const std::string& side, double amount, double price = 0.0) {
         return impl_->createOrder(symbol, side, amount, price);
@@ -69,6 +66,7 @@ public:
         return impl_->fetchMyTrades(symbol, limit);
     }
     std::map<std::string, double> fetchBalance() { return impl_->fetchBalance(); }
+    AccountInfo fetchAccountInfo() { return impl_->fetchAccountInfo(); }
 
 private:
     std::unique_ptr<Exchange> impl_;

@@ -746,6 +746,70 @@ public:
          return "";
     }
 
+    // New Public
+    TickerStats fetchTicker24h(const std::string& symbol) override {
+        TickerStats stats; stats.symbol = symbol;
+        if (exchangeName_ == "binance-us" || exchangeName_ == "binance") {
+             ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get 24h Ticker");
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/v3/ticker/24hr"}, {"HTTP_QUERY_STRING", "symbol=" + symbol}});
+
+             auto events = sendRequestSync(request);
+             for(const auto& event : events) {
+                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                     for(const auto& msg : event.getMessageList()) {
+                         for(const auto& elem : msg.getElementList()) {
+                             if(elem.getNameValueMap().count("HTTP_BODY")) {
+                                 rapidjson::Document d; d.Parse(elem.getNameValueMap().at("HTTP_BODY").c_str());
+                                 if(!d.HasParseError()) {
+                                     stats.priceChange = std::stod(d["priceChange"].GetString());
+                                     stats.priceChangePercent = std::stod(d["priceChangePercent"].GetString());
+                                     stats.weightedAvgPrice = std::stod(d["weightedAvgPrice"].GetString());
+                                     stats.prevClosePrice = std::stod(d["prevClosePrice"].GetString());
+                                     stats.lastPrice = std::stod(d["lastPrice"].GetString());
+                                     stats.bidPrice = std::stod(d["bidPrice"].GetString());
+                                     stats.askPrice = std::stod(d["askPrice"].GetString());
+                                     stats.openPrice = std::stod(d["openPrice"].GetString());
+                                     stats.highPrice = std::stod(d["highPrice"].GetString());
+                                     stats.lowPrice = std::stod(d["lowPrice"].GetString());
+                                     stats.volume = std::stod(d["volume"].GetString());
+                                     stats.quoteVolume = std::stod(d["quoteVolume"].GetString());
+                                     stats.openTime = d["openTime"].GetInt64();
+                                     stats.closeTime = d["closeTime"].GetInt64();
+                                     stats.tradeCount = d["count"].GetInt64();
+                                 }
+                             }
+                         }
+                     }
+                 }
+             }
+        }
+        return stats;
+    }
+
+    long long fetchServerTime() override {
+        if (exchangeName_ == "binance-us" || exchangeName_ == "binance") {
+             ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Server Time");
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/v3/time"}});
+
+             auto events = sendRequestSync(request);
+             for(const auto& event : events) {
+                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                     for(const auto& msg : event.getMessageList()) {
+                         for(const auto& elem : msg.getElementList()) {
+                             if(elem.getNameValueMap().count("HTTP_BODY")) {
+                                 rapidjson::Document d; d.Parse(elem.getNameValueMap().at("HTTP_BODY").c_str());
+                                 if(!d.HasParseError() && d.HasMember("serverTime")) {
+                                     return d["serverTime"].GetInt64();
+                                 }
+                             }
+                         }
+                     }
+                 }
+             }
+        }
+        return 0;
+    }
+
     // Private REST
     std::string createOrder(const std::string& symbol, const std::string& side, double amount, double price = 0.0) override {
         ccapi::Request request(ccapi::Request::Operation::CREATE_ORDER, exchangeName_, symbol);
@@ -874,7 +938,6 @@ public:
     }
 
     std::vector<Trade> fetchMyTrades(const std::string& symbol, int limit = 100) override {
-        // Generic fallback mostly required for My Trades as standard CCAPI support varies
         if (exchangeName_ == "binance-us" || exchangeName_ == "binance") {
              std::vector<Trade> trades;
              ccapi::Request request(ccapi::Request::Operation::GENERIC_PRIVATE_REQUEST, exchangeName_, "", "Get My Trades");
@@ -899,7 +962,6 @@ public:
                                      for(const auto& t_json : d.GetArray()) {
                                          Trade t;
                                          t.symbol = symbol;
-                                         // id, price, qty, time, isBuyer
                                          if(t_json.HasMember("id")) t.id = std::to_string(t_json["id"].GetInt64());
                                          if(t_json.HasMember("price")) t.price = std::stod(t_json["price"].GetString());
                                          if(t_json.HasMember("qty")) t.size = std::stod(t_json["qty"].GetString());
@@ -948,6 +1010,51 @@ public:
             }
         }
         return balances;
+    }
+
+    AccountInfo fetchAccountInfo() override {
+        AccountInfo info;
+        if (exchangeName_ == "binance-us" || exchangeName_ == "binance") {
+             ccapi::Request request(ccapi::Request::Operation::GENERIC_PRIVATE_REQUEST, exchangeName_, "", "Get Account Info");
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/v3/account"}});
+
+             if (!config_.apiKey.empty()) {
+                std::map<std::string, std::string> creds;
+                creds[ccapi::toString(exchangeName_) + "_API_KEY"] = config_.apiKey;
+                creds[ccapi::toString(exchangeName_) + "_API_SECRET"] = config_.apiSecret;
+                request.setCredential(creds);
+             } else throw std::runtime_error("API Key required");
+
+             auto events = sendRequestSync(request);
+             for(const auto& event : events) {
+                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                     for(const auto& msg : event.getMessageList()) {
+                         for(const auto& elem : msg.getElementList()) {
+                             if(elem.getNameValueMap().count("HTTP_BODY")) {
+                                 rapidjson::Document d; d.Parse(elem.getNameValueMap().at("HTTP_BODY").c_str());
+                                 if(!d.HasParseError()) {
+                                     if(d.HasMember("makerCommission")) info.makerCommission = d["makerCommission"].GetInt();
+                                     if(d.HasMember("takerCommission")) info.takerCommission = d["takerCommission"].GetInt();
+                                     if(d.HasMember("canTrade")) info.canTrade = d["canTrade"].GetBool();
+                                     if(d.HasMember("canWithdraw")) info.canWithdraw = d["canWithdraw"].GetBool();
+                                     if(d.HasMember("canDeposit")) info.canDeposit = d["canDeposit"].GetBool();
+                                     if(d.HasMember("updateTime")) info.updateTime = d["updateTime"].GetInt64();
+                                     if(d.HasMember("accountType")) info.accountType = d["accountType"].GetString();
+                                     if(d.HasMember("balances") && d["balances"].IsArray()) {
+                                         for(const auto& b : d["balances"].GetArray()) {
+                                             std::string asset = b["asset"].GetString();
+                                             double free = std::stod(b["free"].GetString());
+                                             info.balances[asset] = free;
+                                         }
+                                     }
+                                 }
+                             }
+                         }
+                     }
+                 }
+             }
+        }
+        return info;
     }
 
 private:
