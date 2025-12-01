@@ -32,3 +32,7 @@ target_link_libraries(test_global PRIVATE OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLI
 # Geoblock Test Executable
 add_executable(test_geoblock src/test_geoblock.cpp)
 target_link_libraries(test_geoblock PRIVATE OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB dl pthread ${Boost_LIBRARIES})
+
+# Specific Exchange Tests
+add_executable(test_binance_us src/tests/test_binance_us.cpp)
+target_link_libraries(test_binance_us PRIVATE OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB dl pthread ${Boost_LIBRARIES})
