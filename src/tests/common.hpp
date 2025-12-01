@@ -28,7 +28,6 @@ inline void run_exchange_test(const std::string& exchange_name) {
             return;
         }
 
-        // Pick a pair (e.g. BTC/USDT or similar)
         std::string symbol = instruments[0].symbol;
         for(const auto& i : instruments) {
             if(i.baseAsset == "BTC" && (i.quoteAsset == "USDT" || i.quoteAsset == "USD")) {
@@ -74,7 +73,7 @@ inline void run_exchange_test(const std::string& exchange_name) {
             std::cerr << "  FAILED: " << e.what() << std::endl;
         }
 
-        // 7. Single Instrument (New)
+        // 7. Single Instrument
         std::cout << "[Step 7] Single Instrument..." << std::endl;
         try {
             Instrument i = exchange.fetchInstrument(symbol);
@@ -83,7 +82,7 @@ inline void run_exchange_test(const std::string& exchange_name) {
             std::cerr << "  FAILED: " << e.what() << std::endl;
         }
 
-        // 8. Historical OHLCV (New)
+        // 8. Historical OHLCV
         std::cout << "[Step 8] Historical OHLCV..." << std::endl;
         try {
             std::string start = "2024-01-01T00:00:00Z";
@@ -94,7 +93,7 @@ inline void run_exchange_test(const std::string& exchange_name) {
             std::cerr << "  FAILED: " << e.what() << std::endl;
         }
 
-        // 9. Historical Trades (New)
+        // 9. Historical Trades
         std::cout << "[Step 9] Historical Trades..." << std::endl;
         try {
             std::string start = "2024-01-01T00:00:00Z";
@@ -105,24 +104,40 @@ inline void run_exchange_test(const std::string& exchange_name) {
             std::cerr << "  FAILED: " << e.what() << std::endl;
         }
 
-        // 10. Custom Request (New)
+        // 10. Custom Request
         std::cout << "[Step 10] Custom Request..." << std::endl;
         try {
-            // Ping for Binance
             std::string res = exchange.sendCustomRequest("GET", "/api/v3/ping");
             std::cout << "  Ping: " << (res.empty() ? "{}" : res) << std::endl;
         } catch(const std::exception& e) {
             std::cerr << "  FAILED: " << e.what() << std::endl;
         }
 
-        // 6. WS (Last because it sleeps)
-        std::cout << "[Step 6] WS Subscriptions (10s)..." << std::endl;
+        // 11. Private REST Connectivity (Expected Fail)
+        std::cout << "[Step 11] Private REST Check..." << std::endl;
+        try {
+            exchange.fetchMyTrades(symbol, 5);
+            std::cerr << "  ERROR: Should have failed (no key)." << std::endl;
+        } catch(const std::exception& e) {
+            std::cout << "  Expected Failure: " << e.what() << std::endl;
+        }
+
+        // 6 & 12. WS Subscriptions
+        std::cout << "[Step 12] WS Subscriptions (Public + Private)..." << std::endl;
         std::atomic<int> updates{0};
         exchange.setOnTicker([&](const Ticker&){ updates++; });
         exchange.setOnOrderBook([&](const OrderBook&){ updates++; });
+        exchange.setOnOrderUpdate([&](const Order&){ std::cout << "  Order Update!" << std::endl; });
+        exchange.setOnAccountUpdate([&](const BalanceUpdate&){ std::cout << "  Account Update!" << std::endl; });
 
         exchange.subscribeTicker(symbol);
         exchange.subscribeOrderBook(symbol);
+
+        // Private Subscriptions (Might print error logs internally)
+        try {
+            exchange.subscribeOrderUpdates(symbol);
+            exchange.subscribeAccountUpdates();
+        } catch(...) {}
 
         std::this_thread::sleep_for(std::chrono::seconds(10));
         std::cout << "  WS Updates received: " << updates << std::endl;

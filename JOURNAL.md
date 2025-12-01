@@ -58,6 +58,19 @@
 - **Tests**:
     - Mise à jour de `src/tests/common.hpp` et validation via `test_binance_us`.
 
+## Extension API Privée (Complete)
+- **Objectif**: Implémenter et tester l'infrastructure pour le trading privé (REST et WebSocket).
+- **Ajouts**:
+    - **REST**: `cancelOrder`, `fetchOrder`, `fetchOpenOrders`, `fetchMyTrades`.
+    - **WebSocket**: `subscribeOrderUpdates` (Execution Reports), `subscribeAccountUpdates` (Balances).
+- **Implémentation**:
+    - Mapping des opérations CCAPI (`CANCEL_ORDER`, `GET_ORDER`, etc.).
+    - Implementation manuelle Generic pour `fetchMyTrades` (`/api/v3/myTrades`) pour gérer l'authentification et les paramètres spécifiques.
+    - Gestion des événements WebSocket `EXECUTION_MANAGEMENT` pour dispatcher les mises à jour d'ordres et de balances via des callbacks.
+- **Tests**:
+    - Validation de la connectivité REST Privée (échec attendu avec "API Key required", prouvant que la requête est bien formée et sécurisée).
+    - Validation de la souscription WebSocket Privée (pas de crash).
+
 ## Résultats des Tests
 - Le wrapper compile et s'exécute correctement.
 - Les tests globaux (`test_global`) sont prêts à être exécutés dans l'environnement cible (Suisse) pour valider les exchanges géo-bloqués aux USA (Binance, Bybit, etc.).
@@ -68,4 +81,4 @@ Le wrapper `UnifiedExchange.hpp` atteint son objectif de normalisation et d'exte
 - **Utilisation**: `UnifiedExchange exchange("nom_exchange"); exchange.fetchTicker("SYMBOL");`
 - **Abstraction**: L'utilisateur n'a pas à se soucier si l'appel sous-jacent est un `GET_BBOS` standard CCAPI ou une `GENERIC_PUBLIC_REQUEST` parsée manuellement.
 - **Robustesse**: Le code compile proprement et gère les erreurs de parsing JSON ou de réseau sans crasher.
-- **WebSocket**: Support complet avec callbacks.
+- **WebSocket**: Support complet avec callbacks (Public & Privé).

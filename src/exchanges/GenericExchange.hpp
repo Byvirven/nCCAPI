@@ -28,6 +28,8 @@ private:
     OrderBookCallback onOrderBook_;
     TradeCallback onTrade_;
     OHLCVCallback onOHLCV_;
+    OrderUpdateCallback onOrderUpdate_;
+    AccountUpdateCallback onAccountUpdate_;
 
     std::unique_ptr<GenericEventHandler> eventHandler_;
     std::unique_ptr<ccapi::Session> session_;
@@ -372,8 +374,10 @@ public:
     void setOnOrderBook(OrderBookCallback cb) override { onOrderBook_ = cb; }
     void setOnTrade(TradeCallback cb) override { onTrade_ = cb; }
     void setOnOHLCV(OHLCVCallback cb) override { onOHLCV_ = cb; }
+    void setOnOrderUpdate(OrderUpdateCallback cb) override { onOrderUpdate_ = cb; }
+    void setOnAccountUpdate(AccountUpdateCallback cb) override { onAccountUpdate_ = cb; }
 
-    // WebSocket
+    // WebSocket - Public
     void subscribeTicker(const std::string& symbol) override {
         ccapi::Subscription subscription(exchangeName_, symbol, "MARKET_TICKER");
         session_->subscribe(subscription);
@@ -396,7 +400,18 @@ public:
         session_->subscribe(subscription);
     }
 
-    // REST
+    // WebSocket - Private
+    void subscribeOrderUpdates(const std::string& symbol) override {
+        ccapi::Subscription subscription(exchangeName_, symbol, "ORDER_UPDATE");
+        session_->subscribe(subscription);
+    }
+
+    void subscribeAccountUpdates() override {
+        ccapi::Subscription subscription(exchangeName_, "", "BALANCE_UPDATE");
+        session_->subscribe(subscription);
+    }
+
+    // REST - Public
     Ticker fetchTicker(const std::string& symbol) override {
         if (shouldUseGenericTicker()) return fetchTickerGeneric(symbol);
 
@@ -526,7 +541,6 @@ public:
         return instruments;
     }
 
-    // New Public API Methods
     Instrument fetchInstrument(const std::string& symbol) override {
         if (shouldUseGenericInstrument()) return fetchInstrumentGeneric(symbol);
 
@@ -572,7 +586,6 @@ public:
                                  if(!d.HasParseError() && d.IsArray()) {
                                      for(const auto& k : d.GetArray()) {
                                          OHLCV c;
-                                         // [0] timestamp, [1] open, [2] high, [3] low, [4] close, [5] vol
                                          c.timestamp = msToIso(k[0].GetInt64());
                                          c.open = std::stod(k[1].GetString());
                                          c.high = std::stod(k[2].GetString());
@@ -641,7 +654,6 @@ public:
                                      for(const auto& t_json : d.GetArray()) {
                                          Trade t;
                                          t.symbol = symbol;
-                                         // a: id, p: price, q: qty, T: timestamp, m: isBuyerMaker
                                          t.id = std::to_string(t_json["a"].GetInt64());
                                          t.price = std::stod(t_json["p"].GetString());
                                          t.size = std::stod(t_json["q"].GetString());
@@ -718,7 +730,7 @@ public:
          return "";
     }
 
-    // Private
+    // Private REST
     std::string createOrder(const std::string& symbol, const std::string& side, double amount, double price = 0.0) override {
         ccapi::Request request(ccapi::Request::Operation::CREATE_ORDER, exchangeName_, symbol);
         std::string sideUpper = side;
@@ -749,6 +761,145 @@ public:
             }
         }
         throw std::runtime_error("No Order ID returned");
+    }
+
+    std::string cancelOrder(const std::string& symbol, const std::string& orderId) override {
+        ccapi::Request request(ccapi::Request::Operation::CANCEL_ORDER, exchangeName_, symbol);
+        request.appendParam({{"ORDER_ID", orderId}});
+
+        if (!config_.apiKey.empty()) {
+            std::map<std::string, std::string> creds;
+            creds[ccapi::toString(exchangeName_) + "_API_KEY"] = config_.apiKey;
+            creds[ccapi::toString(exchangeName_) + "_API_SECRET"] = config_.apiSecret;
+            if (!config_.passphrase.empty()) creds[ccapi::toString(exchangeName_) + "_API_PASSPHRASE"] = config_.passphrase;
+            request.setCredential(creds);
+        } else throw std::runtime_error("API Key required");
+
+        auto events = sendRequestSync(request);
+        for (const auto& event : events) {
+            if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                for (const auto& message : event.getMessageList()) {
+                    if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) throw std::runtime_error(message.toString());
+                    for (const auto& element : message.getElementList()) {
+                        const auto& map = element.getNameValueMap();
+                        if (map.count("ORDER_ID")) return map.at("ORDER_ID");
+                    }
+                }
+            }
+        }
+        return orderId;
+    }
+
+    Order fetchOrder(const std::string& symbol, const std::string& orderId) override {
+        Order order; order.symbol = symbol; order.id = orderId;
+        ccapi::Request request(ccapi::Request::Operation::GET_ORDER, exchangeName_, symbol);
+        request.appendParam({{"ORDER_ID", orderId}});
+
+        if (!config_.apiKey.empty()) {
+            std::map<std::string, std::string> creds;
+            creds[ccapi::toString(exchangeName_) + "_API_KEY"] = config_.apiKey;
+            creds[ccapi::toString(exchangeName_) + "_API_SECRET"] = config_.apiSecret;
+            if (!config_.passphrase.empty()) creds[ccapi::toString(exchangeName_) + "_API_PASSPHRASE"] = config_.passphrase;
+            request.setCredential(creds);
+        } else throw std::runtime_error("API Key required");
+
+        auto events = sendRequestSync(request);
+        for (const auto& event : events) {
+            if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                for (const auto& message : event.getMessageList()) {
+                    if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) throw std::runtime_error(message.toString());
+                    for (const auto& element : message.getElementList()) {
+                        const auto& map = element.getNameValueMap();
+                        if (map.count("ORDER_ID")) order.id = map.at("ORDER_ID");
+                        if (map.count("SIDE")) order.side = map.at("SIDE");
+                        if (map.count("LIMIT_PRICE")) order.price = std::stod(map.at("LIMIT_PRICE"));
+                        if (map.count("QUANTITY")) order.size = std::stod(map.at("QUANTITY"));
+                        if (map.count("CUMULATIVE_FILLED_QUANTITY")) order.filled = std::stod(map.at("CUMULATIVE_FILLED_QUANTITY"));
+                        if (map.count("STATUS")) order.status = map.at("STATUS");
+                    }
+                }
+            }
+        }
+        return order;
+    }
+
+    std::vector<Order> fetchOpenOrders(const std::string& symbol) override {
+        std::vector<Order> orders;
+        ccapi::Request request(ccapi::Request::Operation::GET_OPEN_ORDERS, exchangeName_, symbol);
+
+        if (!config_.apiKey.empty()) {
+            std::map<std::string, std::string> creds;
+            creds[ccapi::toString(exchangeName_) + "_API_KEY"] = config_.apiKey;
+            creds[ccapi::toString(exchangeName_) + "_API_SECRET"] = config_.apiSecret;
+            if (!config_.passphrase.empty()) creds[ccapi::toString(exchangeName_) + "_API_PASSPHRASE"] = config_.passphrase;
+            request.setCredential(creds);
+        } else throw std::runtime_error("API Key required");
+
+        auto events = sendRequestSync(request);
+        for (const auto& event : events) {
+            if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                for (const auto& message : event.getMessageList()) {
+                    if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) throw std::runtime_error(message.toString());
+                    for (const auto& element : message.getElementList()) {
+                        const auto& map = element.getNameValueMap();
+                        Order order; order.symbol = symbol;
+                        if (map.count("ORDER_ID")) order.id = map.at("ORDER_ID");
+                        if (map.count("SIDE")) order.side = map.at("SIDE");
+                        if (map.count("LIMIT_PRICE")) order.price = std::stod(map.at("LIMIT_PRICE"));
+                        if (map.count("QUANTITY")) order.size = std::stod(map.at("QUANTITY"));
+                        if (map.count("CUMULATIVE_FILLED_QUANTITY")) order.filled = std::stod(map.at("CUMULATIVE_FILLED_QUANTITY"));
+                        if (map.count("STATUS")) order.status = map.at("STATUS");
+                        orders.push_back(order);
+                    }
+                }
+            }
+        }
+        return orders;
+    }
+
+    std::vector<Trade> fetchMyTrades(const std::string& symbol, int limit = 100) override {
+        // Generic fallback mostly required for My Trades as standard CCAPI support varies
+        if (exchangeName_ == "binance-us" || exchangeName_ == "binance") {
+             std::vector<Trade> trades;
+             ccapi::Request request(ccapi::Request::Operation::GENERIC_PRIVATE_REQUEST, exchangeName_, "", "Get My Trades");
+             std::string qs = "symbol=" + symbol + "&limit=" + std::to_string(limit);
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/v3/myTrades"}, {"HTTP_QUERY_STRING", qs}});
+
+             if (!config_.apiKey.empty()) {
+                std::map<std::string, std::string> creds;
+                creds[ccapi::toString(exchangeName_) + "_API_KEY"] = config_.apiKey;
+                creds[ccapi::toString(exchangeName_) + "_API_SECRET"] = config_.apiSecret;
+                request.setCredential(creds);
+             } else throw std::runtime_error("API Key required");
+
+             auto events = sendRequestSync(request);
+             for(const auto& event : events) {
+                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                     for(const auto& msg : event.getMessageList()) {
+                         for(const auto& elem : msg.getElementList()) {
+                             if(elem.getNameValueMap().count("HTTP_BODY")) {
+                                 rapidjson::Document d; d.Parse(elem.getNameValueMap().at("HTTP_BODY").c_str());
+                                 if(!d.HasParseError() && d.IsArray()) {
+                                     for(const auto& t_json : d.GetArray()) {
+                                         Trade t;
+                                         t.symbol = symbol;
+                                         // id, price, qty, time, isBuyer
+                                         if(t_json.HasMember("id")) t.id = std::to_string(t_json["id"].GetInt64());
+                                         if(t_json.HasMember("price")) t.price = std::stod(t_json["price"].GetString());
+                                         if(t_json.HasMember("qty")) t.size = std::stod(t_json["qty"].GetString());
+                                         if(t_json.HasMember("time")) t.timestamp = msToIso(t_json["time"].GetInt64());
+                                         if(t_json.HasMember("isBuyer")) t.side = t_json["isBuyer"].GetBool() ? "buy" : "sell";
+                                         trades.push_back(t);
+                                     }
+                                 }
+                             }
+                         }
+                     }
+                 }
+             }
+             return trades;
+        }
+        throw std::runtime_error("Not implemented for this exchange");
     }
 
     std::map<std::string, double> fetchBalance() override {
@@ -841,6 +992,37 @@ private:
                                  parent_->onOHLCV_(c);
                              }
                          }
+                    }
+                    else if (message.getType() == ccapi::Message::Type::EXECUTION_MANAGEMENT_EVENTS_ORDER_UPDATE) {
+                        if (parent_->onOrderUpdate_) {
+                            for (const auto& element : message.getElementList()) {
+                                const auto& map = element.getNameValueMap();
+                                Order o;
+                                if (map.count("ORDER_ID")) o.id = map.at("ORDER_ID");
+                                if (map.count("CLIENT_ORDER_ID")) o.clientOrderId = map.at("CLIENT_ORDER_ID");
+                                if (map.count("SIDE")) o.side = map.at("SIDE");
+                                if (map.count("LIMIT_PRICE")) o.price = std::stod(map.at("LIMIT_PRICE"));
+                                if (map.count("QUANTITY")) o.size = std::stod(map.at("QUANTITY"));
+                                if (map.count("CUMULATIVE_FILLED_QUANTITY")) o.filled = std::stod(map.at("CUMULATIVE_FILLED_QUANTITY"));
+                                if (map.count("STATUS")) o.status = map.at("STATUS");
+                                o.timestamp = message.getTimeISO();
+                                parent_->onOrderUpdate_(o);
+                            }
+                        }
+                    }
+                    else if (message.getType() == ccapi::Message::Type::EXECUTION_MANAGEMENT_EVENTS_BALANCE_UPDATE) {
+                        if (parent_->onAccountUpdate_) {
+                            for (const auto& element : message.getElementList()) {
+                                const auto& map = element.getNameValueMap();
+                                BalanceUpdate b;
+                                if (map.count("ASSET")) b.asset = map.at("ASSET");
+                                if (map.count("QUANTITY_AVAILABLE_FOR_TRADING")) b.free = std::stod(map.at("QUANTITY_AVAILABLE_FOR_TRADING"));
+                                // CCAPI usually provides available. Locked might be calculated or separate.
+                                // For simplicity, we just pass available as free.
+                                b.timestamp = message.getTimeISO();
+                                parent_->onAccountUpdate_(b);
+                            }
+                        }
                     }
                 }
             }
