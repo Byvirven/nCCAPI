@@ -35,6 +35,18 @@ public:
     std::vector<OHLCV> fetchOHLCV(const std::string& symbol, const std::string& timeframe = "60", int limit = 100) { return impl_->fetchOHLCV(symbol, timeframe, limit); }
     std::vector<Instrument> fetchInstruments() { return impl_->fetchInstruments(); }
 
+    // New Proxy Methods
+    Instrument fetchInstrument(const std::string& symbol) { return impl_->fetchInstrument(symbol); }
+    std::vector<OHLCV> fetchOHLCVHistorical(const std::string& symbol, const std::string& timeframe, const std::string& startTime, const std::string& endTime, int limit = 1000) {
+        return impl_->fetchOHLCVHistorical(symbol, timeframe, startTime, endTime, limit);
+    }
+    std::vector<Trade> fetchTradesHistorical(const std::string& symbol, const std::string& startTime, const std::string& endTime, int limit = 1000) {
+        return impl_->fetchTradesHistorical(symbol, startTime, endTime, limit);
+    }
+    std::string sendCustomRequest(const std::string& method, const std::string& path, const std::map<std::string, std::string>& params = {}) {
+        return impl_->sendCustomRequest(method, path, params);
+    }
+
     std::string createOrder(const std::string& symbol, const std::string& side, double amount, double price = 0.0) {
         return impl_->createOrder(symbol, side, amount, price);
     }

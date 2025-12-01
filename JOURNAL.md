@@ -45,6 +45,19 @@
         4. Subscribe WS et écoute pendant 3 minutes.
         5. Génération d'un rapport `report.txt`.
 
+## Extension API Publique (Binance US focus)
+- **Objectif**: Assurer une couverture complète des fonctionnalités publiques pour Binance US.
+- **Ajouts**:
+    - `fetchInstrument(symbol)`: Détails d'une paire (status, tickSize, etc.).
+    - `fetchOHLCVHistorical`: Données historiques avec plage de temps.
+    - `fetchTradesHistorical`: Trades historiques avec plage de temps.
+    - `sendCustomRequest`: Envoi de requêtes brutes (pour endpoints spécifiques).
+- **Implementation**:
+    - Pour Binance US, utilisation intensive de `GENERIC_PUBLIC_REQUEST` parsée manuellement pour contourner les limitations de CCAPI sur les endpoints historiques (`klines`, `aggTrades`) et les formats de paramètres.
+    - Ajout de helpers `isoToMs` et `msToIso` pour la conversion des timestamps ISO 8601 <-> Epoch MS.
+- **Tests**:
+    - Mise à jour de `src/tests/common.hpp` et validation via `test_binance_us`.
+
 ## Résultats des Tests
 - Le wrapper compile et s'exécute correctement.
 - Les tests globaux (`test_global`) sont prêts à être exécutés dans l'environnement cible (Suisse) pour valider les exchanges géo-bloqués aux USA (Binance, Bybit, etc.).

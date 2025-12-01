@@ -25,9 +25,6 @@ inline void run_exchange_test(const std::string& exchange_name) {
 
         if (instruments.empty()) {
             std::cerr << "  CRITICAL FAILURE: No instruments found." << std::endl;
-            // Try to proceed anyway if possible with a hardcoded symbol?
-            // But usually this means API connection or mapping failed.
-            // We'll return to let the dev fix it.
             return;
         }
 
@@ -77,7 +74,48 @@ inline void run_exchange_test(const std::string& exchange_name) {
             std::cerr << "  FAILED: " << e.what() << std::endl;
         }
 
-        // 6. WS
+        // 7. Single Instrument (New)
+        std::cout << "[Step 7] Single Instrument..." << std::endl;
+        try {
+            Instrument i = exchange.fetchInstrument(symbol);
+            std::cout << "  Status: " << i.status << " | Tick: " << i.tickSize << " | Step: " << i.stepSize << std::endl;
+        } catch(const std::exception& e) {
+            std::cerr << "  FAILED: " << e.what() << std::endl;
+        }
+
+        // 8. Historical OHLCV (New)
+        std::cout << "[Step 8] Historical OHLCV..." << std::endl;
+        try {
+            std::string start = "2024-01-01T00:00:00Z";
+            std::string end = "2024-01-01T04:00:00Z";
+            auto candles = exchange.fetchOHLCVHistorical(symbol, "3600", start, end, 10);
+            std::cout << "  Hist Candles: " << candles.size() << std::endl;
+        } catch(const std::exception& e) {
+            std::cerr << "  FAILED: " << e.what() << std::endl;
+        }
+
+        // 9. Historical Trades (New)
+        std::cout << "[Step 9] Historical Trades..." << std::endl;
+        try {
+            std::string start = "2024-01-01T00:00:00Z";
+            std::string end = "2024-01-01T00:10:00Z";
+            auto trades = exchange.fetchTradesHistorical(symbol, start, end, 10);
+            std::cout << "  Hist Trades: " << trades.size() << std::endl;
+        } catch(const std::exception& e) {
+            std::cerr << "  FAILED: " << e.what() << std::endl;
+        }
+
+        // 10. Custom Request (New)
+        std::cout << "[Step 10] Custom Request..." << std::endl;
+        try {
+            // Ping for Binance
+            std::string res = exchange.sendCustomRequest("GET", "/api/v3/ping");
+            std::cout << "  Ping: " << (res.empty() ? "{}" : res) << std::endl;
+        } catch(const std::exception& e) {
+            std::cerr << "  FAILED: " << e.what() << std::endl;
+        }
+
+        // 6. WS (Last because it sleeps)
         std::cout << "[Step 6] WS Subscriptions (10s)..." << std::endl;
         std::atomic<int> updates{0};
         exchange.setOnTicker([&](const Ticker&){ updates++; });
