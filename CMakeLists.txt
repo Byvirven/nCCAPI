@@ -18,7 +18,8 @@ include_directories(${Boost_INCLUDE_DIRS})
 # /usr/include is default, so rapidjson should be found.
 
 # Compiler Flags
-add_compile_options(-Wall -Wextra -pthread -Wno-deprecated -Wno-nonnull -Wno-deprecated-declarations)
+# -w suppresses all warnings (requested by user to match CCAPI examples behavior)
+add_compile_options(-w -pthread)
 
 # Test Executable (REST Wrapper Test)
 add_executable(test_wrapper src/main.cpp)

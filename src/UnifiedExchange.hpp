@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ccapi_config.hpp" // MUST be included before ccapi_session.h
 #include "ccapi_cpp/ccapi_session.h"
 #include <string>
 #include <vector>
