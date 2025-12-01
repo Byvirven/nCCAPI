@@ -291,6 +291,14 @@ private:
                                          inst.baseAsset = i["baseAsset"].GetString();
                                          inst.quoteAsset = i["quoteAsset"].GetString();
                                          if (i.HasMember("status")) inst.status = i["status"].GetString();
+                                         if (i.HasMember("permissions") && i["permissions"].IsArray()) {
+                                             std::string perms;
+                                             for(const auto& p : i["permissions"].GetArray()) {
+                                                 if(!perms.empty()) perms += ",";
+                                                 perms += p.GetString();
+                                             }
+                                             inst.type = perms;
+                                         }
                                          if (i.HasMember("filters") && i["filters"].IsArray()) {
                                              for(const auto& f : i["filters"].GetArray()) {
                                                  std::string ft = f["filterType"].GetString();
@@ -334,6 +342,14 @@ private:
                                          inst.baseAsset = i["baseAsset"].GetString();
                                          inst.quoteAsset = i["quoteAsset"].GetString();
                                          if (i.HasMember("status")) inst.status = i["status"].GetString();
+                                         if (i.HasMember("permissions") && i["permissions"].IsArray()) {
+                                             std::string perms;
+                                             for(const auto& p : i["permissions"].GetArray()) {
+                                                 if(!perms.empty()) perms += ",";
+                                                 perms += p.GetString();
+                                             }
+                                             inst.type = perms;
+                                         }
                                          if (i.HasMember("filters") && i["filters"].IsArray()) {
                                              for(const auto& f : i["filters"].GetArray()) {
                                                  std::string ft = f["filterType"].GetString();
@@ -1017,8 +1033,6 @@ private:
                                 BalanceUpdate b;
                                 if (map.count("ASSET")) b.asset = map.at("ASSET");
                                 if (map.count("QUANTITY_AVAILABLE_FOR_TRADING")) b.free = std::stod(map.at("QUANTITY_AVAILABLE_FOR_TRADING"));
-                                // CCAPI usually provides available. Locked might be calculated or separate.
-                                // For simplicity, we just pass available as free.
                                 b.timestamp = message.getTimeISO();
                                 parent_->onAccountUpdate_(b);
                             }

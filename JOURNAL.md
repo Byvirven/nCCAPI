@@ -71,6 +71,14 @@
     - Validation de la connectivité REST Privée (échec attendu avec "API Key required", prouvant que la requête est bien formée et sécurisée).
     - Validation de la souscription WebSocket Privée (pas de crash).
 
+## Amélioration des Tests (Verbose Mode)
+- **Objectif**: Permettre une inspection détaillée des données retournées pour valider la complétude à 100%.
+- **Implementation**:
+    - Ajout du flag `--verbose` à `test_binance_us`.
+    - Implémentation de fonctions de print exhaustives (`printInstrument`, `printOrderBook`, `printTrade`, `printOHLCV`) affichant tous les champs (y compris `type` SPOT/MARGIN, statuts, tick sizes, etc.).
+    - Mise à jour de `Instrument` struct pour inclure le champ `type`.
+    - Parsing des permissions/types dans `GenericExchange` pour Binance US.
+
 ## Résultats des Tests
 - Le wrapper compile et s'exécute correctement.
 - Les tests globaux (`test_global`) sont prêts à être exécutés dans l'environnement cible (Suisse) pour valider les exchanges géo-bloqués aux USA (Binance, Bybit, etc.).
