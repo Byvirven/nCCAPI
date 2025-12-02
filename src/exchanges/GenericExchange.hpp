@@ -235,6 +235,7 @@ protected:
                              if (exchangeName_ == "bybit" && d.HasMember("result")) {
                                  for(const auto& k : d["result"]["list"].GetArray()) {
                                      OHLCV c;
+                                     c.symbol = symbol;
                                      c.timestamp = k[0].GetString();
                                      c.open = std::stod(k[1].GetString());
                                      c.high = std::stod(k[2].GetString());
@@ -247,6 +248,7 @@ protected:
                              if (exchangeName_.find("gateio") != std::string::npos && d.IsArray()) {
                                  for(const auto& k : d.GetArray()) {
                                      OHLCV c;
+                                     c.symbol = symbol;
                                      c.timestamp = k[0].GetString();
                                      c.volume = std::stod(k[1].GetString());
                                      c.close = std::stod(k[2].GetString());
@@ -260,6 +262,7 @@ protected:
                                  for(const auto& item : d["data"].GetArray()) {
                                      const auto& k = item["data"];
                                      OHLCV c;
+                                     c.symbol = symbol;
                                      c.timestamp = msToIso(k["ts"].GetInt64());
                                      c.open = std::stod(k["o"].GetString());
                                      c.high = std::stod(k["h"].GetString());
@@ -633,6 +636,7 @@ public:
                     for (const auto& element : message.getElementList()) {
                         const auto& map = element.getNameValueMap();
                         OHLCV c;
+                        c.symbol = symbol;
                         if (map.count("START_TIME")) c.timestamp = map.at("START_TIME");
                         if (map.count("OPEN_PRICE")) c.open = std::stod(map.at("OPEN_PRICE"));
                         if (map.count("HIGH_PRICE")) c.high = std::stod(map.at("HIGH_PRICE"));
@@ -716,6 +720,7 @@ public:
                                  if(!d.HasParseError() && d.IsArray()) {
                                      for(const auto& k : d.GetArray()) {
                                          OHLCV c;
+                                         c.symbol = symbol;
                                          c.timestamp = msToIso(k[0].GetInt64());
                                          c.open = std::stod(k[1].GetString());
                                          c.high = std::stod(k[2].GetString());
@@ -750,6 +755,7 @@ public:
                     for (const auto& element : message.getElementList()) {
                         const auto& map = element.getNameValueMap();
                         OHLCV c;
+                        c.symbol = symbol;
                         if (map.count("START_TIME")) c.timestamp = map.at("START_TIME");
                         if (map.count("OPEN_PRICE")) c.open = std::stod(map.at("OPEN_PRICE"));
                         if (map.count("HIGH_PRICE")) c.high = std::stod(map.at("HIGH_PRICE"));
@@ -1222,10 +1228,15 @@ protected:
                              for (const auto& element : message.getElementList()) {
                                  const auto& map = element.getNameValueMap();
                                  OHLCV c;
+                                 if (map.count("INSTRUMENT")) c.symbol = map.at("INSTRUMENT");
                                  if (map.count("OPEN_PRICE")) c.open = std::stod(map.at("OPEN_PRICE"));
                                  if (map.count("CLOSE_PRICE")) c.close = std::stod(map.at("CLOSE_PRICE"));
                                  if (map.count("HIGH_PRICE")) c.high = std::stod(map.at("HIGH_PRICE"));
                                  if (map.count("LOW_PRICE")) c.low = std::stod(map.at("LOW_PRICE"));
+                                 if (map.count("VOLUME")) c.volume = std::stod(map.at("VOLUME"));
+                                 if (map.count("TIMESTAMP")) c.timestamp = map.at("TIMESTAMP"); // Ensure timestamp is set
+                                 else c.timestamp = message.getTimeISO();
+
                                  parent_->onOHLCV_(c);
                              }
                          }

@@ -222,6 +222,7 @@ public:
                             for(const auto& item : d["data"].GetArray()) {
                                 const auto& k = item["data"];
                                 OHLCV c;
+                                c.symbol = symbol;
                                 c.timestamp = msToIso(k["ts"].GetInt64());
                                 c.open = std::stod(k["o"].GetString());
                                 c.high = std::stod(k["h"].GetString());

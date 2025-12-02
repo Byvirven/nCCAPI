@@ -44,7 +44,7 @@ inline void printTrade(const Trade& t) {
 }
 
 inline void printOHLCV(const OHLCV& c) {
-    std::cout << "  [OHLCV] Time=" << c.timestamp << " O=" << c.open << " H=" << c.high
+    std::cout << "  [OHLCV] " << (c.symbol.empty() ? "" : c.symbol + " ") << "Time=" << c.timestamp << " O=" << c.open << " H=" << c.high
               << " L=" << c.low << " C=" << c.close << " V=" << c.volume << std::endl;
 }
 
@@ -240,6 +240,10 @@ inline void run_exchange_test(const std::string& exchange_name, bool verbose = f
             updates++;
             if(verbose) printOrderBook(ob);
         });
+        exchange.setOnOHLCV([&](const OHLCV& c){
+            updates++;
+            if(verbose) printOHLCV(c);
+        });
         exchange.setOnOrderUpdate([&](const Order& o){
             if(verbose) printOrder(o);
             else std::cout << "  [WS Order] ID=" << o.id << " Status=" << o.status << std::endl;
@@ -249,15 +253,30 @@ inline void run_exchange_test(const std::string& exchange_name, bool verbose = f
             else std::cout << "  [WS Balance] Asset=" << b.asset << " Free=" << b.free << std::endl;
         });
 
+        // Dual Pair Test for OHLCV
+        std::string symbol2 = "";
+        for(const auto& i : instruments) {
+            if(i.symbol != symbol && i.baseAsset == "ETH" && (i.quoteAsset == "USDT" || i.quoteAsset == "USD")) {
+                symbol2 = i.symbol;
+                break;
+            }
+        }
+        if(symbol2.empty() && instruments.size() > 1) symbol2 = instruments[1].symbol;
+
+        std::cout << "  Subscribing Ticker/Book for " << symbol << std::endl;
         exchange.subscribeTicker(symbol);
         exchange.subscribeOrderBook(symbol);
+
+        std::cout << "  Subscribing OHLCV for " << symbol << " and " << symbol2 << std::endl;
+        exchange.subscribeOHLCV(symbol);
+        if(!symbol2.empty()) exchange.subscribeOHLCV(symbol2);
 
         try {
             exchange.subscribeOrderUpdates(symbol);
             exchange.subscribeAccountUpdates();
         } catch(...) {}
 
-        std::this_thread::sleep_for(std::chrono::seconds(10));
+        std::this_thread::sleep_for(std::chrono::seconds(15));
         std::cout << "  WS Updates received: " << updates << std::endl;
 
     } catch (const std::exception& e) {

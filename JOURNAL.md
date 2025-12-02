@@ -106,3 +106,15 @@
         - Validation à 100% des méthodes publiques (Ticker, Book, Trades, OHLCV, Instruments).
         - Validation de la logique Private API (échec contrôlé "API Key required" validant l'appel).
     - **Architecture**: `UnifiedExchange` agit désormais comme une factory instanciant `AscendexExchange` ou `GenericExchange` selon le nom de l'exchange, garantissant une utilisation transparente.
+
+## Amélioration des Tests WebSocket (OHLCV & Multi-Paires)
+- **Objectif**: Vérifier la réception des données OHLCV via WebSocket pour AscendEX et BinanceUS, incluant le support multi-paires.
+- **Actions**:
+    - **Mise à jour `GenericExchange`**: Ajout du parsing des champs `symbol` et `volume` pour les événements `CANDLESTICK` afin d'identifier la paire concernée.
+    - **Mise à jour `Exchange.hpp`**: Ajout du champ `symbol` dans la structure `OHLCV`.
+    - **Mise à jour `common.hpp`**:
+        - Ajout de la souscription OHLCV (`subscribeOHLCV`) dans le test standard.
+        - Implémentation d'une logique de sélection d'une seconde paire (ex: ETH/USDT) pour tester la souscription simultanée.
+        - Ajout du callback `setOnOHLCV` pour l'affichage verbeux.
+- **Validation**:
+    - Les tests `test_ascendex` et `test_binance_us` valident désormais la réception des flux Ticker, OrderBook et OHLCV pour plusieurs paires.

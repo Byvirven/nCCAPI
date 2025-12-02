@@ -60,6 +60,7 @@ struct Trade {
 };
 
 struct OHLCV {
+    std::string symbol;
     std::string timestamp;
     double open;
     double high;
