@@ -92,3 +92,17 @@
 - **Validation**:
     - Tests validés avec succès (Ticker 24h retourne des données, Server Time cohérent).
 - **Conclusion**: Le wrapper couvre désormais l'intégralité des besoins de trading standard (Market Data Temps Réel & Historique, Trading, Gestion de Compte, WebSocket Public & Privé) avec une transparence totale et des mécanismes de fallback robustes.
+
+## Intégration AscendEX et Refactorisation Modulaire
+- **Objectif**: Ajouter le support pour l'exchange AscendEX et améliorer la maintenabilité du code via une architecture modulaire.
+- **Actions**:
+    - **Refactorisation `GenericExchange`**: Passage des membres privés en `protected` pour permettre l'héritage.
+    - **Création `AscendexExchange`**: Implémentation d'une sous-classe dédiée gérant les spécificités (quirks) d'AscendEX.
+        - Surcharge des méthodes publiques (`fetchInstruments`, `fetchTicker`, `fetchOrderBook`, `fetchTrades`, `fetchOHLCV`) pour utiliser des requêtes `GENERIC_PUBLIC_REQUEST` adaptées aux endpoints `/api/pro/v1/...`.
+        - Gestion spécifique du parsing JSON pour `fetchInstruments` (endpoints `cash` pour spot, parsing des champs).
+        - Implémentation de `fetchOHLCVHistorical` et `fetchTicker24h`.
+    - **Tests**:
+        - Création de `test_ascendex.cpp` (basé sur `test_binance_us`).
+        - Validation à 100% des méthodes publiques (Ticker, Book, Trades, OHLCV, Instruments).
+        - Validation de la logique Private API (échec contrôlé "API Key required" validant l'appel).
+    - **Architecture**: `UnifiedExchange` agit désormais comme une factory instanciant `AscendexExchange` ou `GenericExchange` selon le nom de l'exchange, garantissant une utilisation transparente.

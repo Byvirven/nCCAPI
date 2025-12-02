@@ -18,7 +18,7 @@ namespace unified_crypto {
  * @brief A generic implementation of the Exchange interface using CCAPI.
  */
 class GenericExchange : public Exchange {
-private:
+protected:
     class GenericEventHandler;
 
     std::string exchangeName_;
@@ -87,15 +87,19 @@ private:
         return std::find(quirks.begin(), quirks.end(), exchangeName_) != quirks.end() || exchangeName_.find("binance") != std::string::npos || exchangeName_.find("gateio") != std::string::npos;
     }
     bool shouldUseGenericOHLCV() {
-        static std::vector<std::string> quirks = {"bybit", "gateio", "whitebit", "bitmex"};
+        static std::vector<std::string> quirks = {"bybit", "gateio", "whitebit", "bitmex", "ascendex"};
         return std::find(quirks.begin(), quirks.end(), exchangeName_) != quirks.end() || exchangeName_.find("gateio") != std::string::npos;
     }
     bool shouldUseGenericInstruments() {
-        static std::vector<std::string> quirks = {"bybit", "gateio", "deribit", "whitebit", "okx", "binance-us", "binance"};
+        static std::vector<std::string> quirks = {"bybit", "gateio", "deribit", "whitebit", "okx", "binance-us", "binance", "ascendex"};
         return std::find(quirks.begin(), quirks.end(), exchangeName_) != quirks.end() || exchangeName_.find("gateio") != std::string::npos;
     }
     bool shouldUseGenericInstrument() {
         return shouldUseGenericInstruments();
+    }
+    bool shouldUseGenericTrades() {
+         static std::vector<std::string> quirks = {"ascendex"};
+         return std::find(quirks.begin(), quirks.end(), exchangeName_) != quirks.end();
     }
 
     // Generic Implementations
@@ -111,6 +115,8 @@ private:
              request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/spot/tickers"}, {"HTTP_QUERY_STRING", "currency_pair=" + symbol}});
          } else if (exchangeName_ == "kraken") {
              request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/0/public/Ticker"}, {"HTTP_QUERY_STRING", "pair=" + symbol}});
+         } else if (exchangeName_ == "ascendex") {
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/pro/v1/spot/ticker"}, {"HTTP_QUERY_STRING", "symbol=" + symbol}});
          }
 
          auto events = sendRequestSync(request);
@@ -128,6 +134,15 @@ private:
                                  ticker.bidPrice = std::stod(l["bid1Price"].GetString());
                                  ticker.askPrice = std::stod(l["ask1Price"].GetString());
                                  ticker.lastPrice = std::stod(l["lastPrice"].GetString());
+                             } else if (exchangeName_ == "ascendex" && d.HasMember("data")) {
+                                 const auto& data = d["data"];
+                                 if(data.IsObject()) {
+                                     ticker.lastPrice = std::stod(data["close"].GetString());
+                                     ticker.bidPrice = std::stod(data["bid"].GetArray()[0].GetString());
+                                     ticker.bidSize = std::stod(data["bid"].GetArray()[1].GetString());
+                                     ticker.askPrice = std::stod(data["ask"].GetArray()[0].GetString());
+                                     ticker.askSize = std::stod(data["ask"].GetArray()[1].GetString());
+                                 }
                              }
                          }
                      }
@@ -148,6 +163,8 @@ private:
              request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/v5/market/orderbook"}, {"HTTP_QUERY_STRING", "category=spot&symbol=" + symbol}});
         } else if (exchangeName_ == "binance-us" || exchangeName_ == "binance") {
              request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/v3/depth"}, {"HTTP_QUERY_STRING", "symbol=" + symbol + "&limit=" + std::to_string(limit)}});
+        } else if (exchangeName_ == "ascendex") {
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/pro/v1/depth"}, {"HTTP_QUERY_STRING", "symbol=" + symbol}});
         }
 
         auto events = sendRequestSync(request);
@@ -168,6 +185,12 @@ private:
                              if ((exchangeName_ == "binance-us" || exchangeName_ == "binance") && d.HasMember("bids")) {
                                  for(const auto& b : d["bids"].GetArray()) ob.bids.push_back({std::stod(b[0].GetString()), std::stod(b[1].GetString())});
                                  for(const auto& a : d["asks"].GetArray()) ob.asks.push_back({std::stod(a[0].GetString()), std::stod(a[1].GetString())});
+                             }
+                             if (exchangeName_ == "ascendex" && d.HasMember("data")) {
+                                 const auto& data = d["data"]["data"];
+                                 ob.timestamp = msToIso(data["ts"].GetInt64());
+                                 for(const auto& b : data["bids"].GetArray()) ob.bids.push_back({std::stod(b[0].GetString()), std::stod(b[1].GetString())});
+                                 for(const auto& a : data["asks"].GetArray()) ob.asks.push_back({std::stod(a[0].GetString()), std::stod(a[1].GetString())});
                              }
                          }
                     }
@@ -193,6 +216,13 @@ private:
               if (timeframe == "3600") interval = "1h";
               request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/spot/candlesticks"},
                 {"HTTP_QUERY_STRING", "currency_pair=" + symbol + "&interval=" + interval + "&limit=" + std::to_string(limit)}});
+         } else if (exchangeName_ == "ascendex") {
+             std::string interval = "1"; // 1 minute
+             if (timeframe == "3600") interval = "60";
+             else if (timeframe == "86400") interval = "1d";
+             // AscendEX expects interval in minutes (1, 5, 15, 60...)
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/pro/v1/barhist"},
+                {"HTTP_QUERY_STRING", "symbol=" + symbol + "&interval=" + interval + "&n=" + std::to_string(limit)}});
          }
 
          auto events = sendRequestSync(request);
@@ -226,6 +256,19 @@ private:
                                      candles.push_back(c);
                                  }
                              }
+                             if (exchangeName_ == "ascendex" && d.HasMember("data")) {
+                                 for(const auto& item : d["data"].GetArray()) {
+                                     const auto& k = item["data"];
+                                     OHLCV c;
+                                     c.timestamp = msToIso(k["ts"].GetInt64());
+                                     c.open = std::stod(k["o"].GetString());
+                                     c.high = std::stod(k["h"].GetString());
+                                     c.low = std::stod(k["l"].GetString());
+                                     c.close = std::stod(k["c"].GetString());
+                                     c.volume = std::stod(k["v"].GetString());
+                                     candles.push_back(c);
+                                 }
+                             }
                          }
                      }
                  }
@@ -246,6 +289,8 @@ private:
              request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/v5/public/instruments"}, {"HTTP_QUERY_STRING", "instType=SPOT"}});
         } else if (exchangeName_ == "binance-us" || exchangeName_ == "binance") {
              request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/v3/exchangeInfo"}});
+        } else if (exchangeName_ == "ascendex") {
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/pro/v1/spot/products"}});
         }
 
         auto events = sendRequestSync(request);
@@ -312,6 +357,19 @@ private:
                                          instruments.push_back(inst);
                                      }
                                  }
+                                 if (exchangeName_ == "ascendex" && d.HasMember("data")) {
+                                     for(const auto& i : d["data"].GetArray()) {
+                                         Instrument inst;
+                                         inst.symbol = i["symbol"].GetString();
+                                         inst.baseAsset = i["baseAsset"].GetString();
+                                         inst.quoteAsset = i["quoteAsset"].GetString();
+                                         inst.status = i["statusCode"].GetString();
+                                         if(i.HasMember("tickSize")) inst.tickSize = std::stod(i["tickSize"].GetString());
+                                         if(i.HasMember("minQty")) inst.minSize = std::stod(i["minQty"].GetString());
+                                         if(i.HasMember("lotSize")) inst.stepSize = std::stod(i["lotSize"].GetString());
+                                         instruments.push_back(inst);
+                                     }
+                                 }
                              }
                          }
                      }
@@ -327,6 +385,8 @@ private:
 
          if (exchangeName_ == "binance-us" || exchangeName_ == "binance") {
              request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/v3/exchangeInfo"}, {"HTTP_QUERY_STRING", "symbol=" + symbol}});
+         } else if (exchangeName_ == "ascendex") {
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/pro/v1/spot/products"}});
          }
 
          auto events = sendRequestSync(request);
@@ -359,6 +419,19 @@ private:
                                                      inst.stepSize = std::stod(f["stepSize"].GetString());
                                                  }
                                              }
+                                         }
+                                     }
+                                 }
+                                 if (exchangeName_ == "ascendex" && d.HasMember("data")) {
+                                     for(const auto& i : d["data"].GetArray()) {
+                                         if(i["symbol"].GetString() == symbol) {
+                                            inst.baseAsset = i["baseAsset"].GetString();
+                                            inst.quoteAsset = i["quoteAsset"].GetString();
+                                            inst.status = i["statusCode"].GetString();
+                                            if(i.HasMember("tickSize")) inst.tickSize = std::stod(i["tickSize"].GetString());
+                                            if(i.HasMember("minQty")) inst.minSize = std::stod(i["minQty"].GetString());
+                                            if(i.HasMember("lotSize")) inst.stepSize = std::stod(i["lotSize"].GetString());
+                                            break;
                                          }
                                      }
                                  }
@@ -477,7 +550,48 @@ public:
         return orderBook;
     }
 
+    std::vector<Trade> fetchTradesGeneric(const std::string& symbol, int limit) {
+        std::vector<Trade> trades;
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, exchangeName_, "", "Get Trades Generic");
+
+        if (exchangeName_ == "ascendex") {
+             request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/pro/v1/trades"}, {"HTTP_QUERY_STRING", "symbol=" + symbol + "&n=" + std::to_string(limit)}});
+        }
+
+        auto events = sendRequestSync(request);
+        for(const auto& event : events) {
+            for(const auto& msg : event.getMessageList()) {
+                for(const auto& elem : msg.getElementList()) {
+                    if(elem.getNameValueMap().count("HTTP_BODY")) {
+                        rapidjson::Document d; d.Parse(elem.getNameValueMap().at("HTTP_BODY").c_str());
+                         if(!d.HasParseError()) {
+                             if(exchangeName_ == "ascendex" && d.HasMember("data")) {
+                                 const auto& data = d["data"]["data"];
+                                 if(data.IsArray()) {
+                                     for(const auto& t_json : data.GetArray()) {
+                                         Trade t;
+                                         t.symbol = symbol;
+                                         t.id = std::to_string(t_json["seqnum"].GetInt64());
+                                         t.price = std::stod(t_json["p"].GetString());
+                                         t.size = std::stod(t_json["q"].GetString());
+                                         t.timestamp = msToIso(t_json["ts"].GetInt64());
+                                         t.isBuyerMaker = t_json["bm"].GetBool();
+                                         t.side = t.isBuyerMaker ? "sell" : "buy";
+                                         trades.push_back(t);
+                                     }
+                                 }
+                             }
+                         }
+                    }
+                }
+            }
+        }
+        return trades;
+    }
+
     std::vector<Trade> fetchTrades(const std::string& symbol, int limit = 100) override {
+        if (shouldUseGenericTrades()) return fetchTradesGeneric(symbol, limit);
+
         std::vector<Trade> trades;
         ccapi::Request request(ccapi::Request::Operation::GET_RECENT_TRADES, exchangeName_, symbol);
         request.appendParam({{"LIMIT", std::to_string(limit)}});
@@ -1057,7 +1171,7 @@ public:
         return info;
     }
 
-private:
+protected:
     class GenericEventHandler : public ccapi::EventHandler {
         GenericExchange* parent_;
     public:

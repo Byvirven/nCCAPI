@@ -2,6 +2,7 @@
 
 #include "Exchange.hpp"
 #include "exchanges/GenericExchange.hpp"
+#include "exchanges/AscendexExchange.hpp"
 #include <memory>
 #include <string>
 #include <vector>
@@ -12,7 +13,11 @@ namespace unified_crypto {
 class UnifiedExchange {
 public:
     UnifiedExchange(const std::string& exchange, const ExchangeConfig& config = {}) {
-        impl_ = std::make_unique<GenericExchange>(exchange, config);
+        if (exchange == "ascendex") {
+            impl_ = std::make_unique<AscendexExchange>(exchange, config);
+        } else {
+            impl_ = std::make_unique<GenericExchange>(exchange, config);
+        }
     }
 
     // Proxy Methods
