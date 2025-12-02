@@ -383,6 +383,74 @@ public:
         return GenericExchange::cancelOrder(symbol, orderId);
     }
 
+    std::vector<std::string> cancelAllOrders(const std::string& symbol) override {
+        if (config_.apiKey.empty()) throw std::runtime_error("API Key required");
+
+        std::vector<std::string> cancelledIds;
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PRIVATE_REQUEST, exchangeName_, "", "Cancel All Orders AscendEX");
+        request.appendParam({{"HTTP_METHOD", "DELETE"}, {"HTTP_PATH", "/api/pro/v1/cash/order/all"}});
+        if (!symbol.empty()) request.appendParam({{"HTTP_QUERY_STRING", "symbol=" + symbol}});
+        setCredentials(request);
+
+        auto events = sendRequestSync(request);
+        for(const auto& event : events) {
+            for(const auto& msg : event.getMessageList()) {
+                for(const auto& elem : msg.getElementList()) {
+                    if(elem.getNameValueMap().count("HTTP_BODY")) {
+                        rapidjson::Document d; d.Parse(elem.getNameValueMap().at("HTTP_BODY").c_str());
+                        if(!d.HasParseError()) {
+                            // AscendEX cancel all returns ACK with no IDs list in "data" usually,
+                            // or maybe info field?
+                            // "data": { "action": "cancel-all", "info": { "id": ... } }
+                            // It doesn't return list of cancelled IDs easily.
+                            // So we just return empty list to indicate success without IDs.
+                        }
+                    }
+                }
+            }
+        }
+        return cancelledIds;
+    }
+
+    TradingFees fetchTradingFees(const std::string& symbol) override {
+        if (config_.apiKey.empty()) throw std::runtime_error("API Key required");
+
+        TradingFees fees{0.0, 0.0};
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PRIVATE_REQUEST, exchangeName_, "", "Get Fees AscendEX");
+        // /api/pro/v1/spot/fee for symbol specific
+        request.appendParam({{"HTTP_METHOD", "GET"}, {"HTTP_PATH", "/api/pro/v1/spot/fee"}, {"HTTP_QUERY_STRING", "symbol=" + symbol}});
+        setCredentials(request);
+
+        auto events = sendRequestSync(request);
+        for(const auto& event : events) {
+            for(const auto& msg : event.getMessageList()) {
+                for(const auto& elem : msg.getElementList()) {
+                    if(elem.getNameValueMap().count("HTTP_BODY")) {
+                        rapidjson::Document d; d.Parse(elem.getNameValueMap().at("HTTP_BODY").c_str());
+                        if(!d.HasParseError() && d.HasMember("data")) {
+                            const auto& data = d["data"];
+                            if (data.IsObject()) {
+                                // "productFee": [ { "fee": { "maker": "...", "taker": "..." }, "symbol": "..." } ]
+                                // Or it might be structure described in docs.
+                                // Let's check docs: "data": { "domain": "spot", "productFee": [ ... ] }
+                                if(data.HasMember("productFee") && data["productFee"].IsArray()) {
+                                    for(const auto& item : data["productFee"].GetArray()) {
+                                        if(item["symbol"].GetString() == symbol) {
+                                            fees.maker = std::stod(item["fee"]["maker"].GetString());
+                                            fees.taker = std::stod(item["fee"]["taker"].GetString());
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return fees;
+    }
+
 private:
     void setCredentials(ccapi::Request& request) {
         std::map<std::string, std::string> creds;

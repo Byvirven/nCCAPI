@@ -61,6 +61,9 @@ public:
     std::string cancelOrder(const std::string& symbol, const std::string& orderId) {
         return impl_->cancelOrder(symbol, orderId);
     }
+    std::vector<std::string> cancelAllOrders(const std::string& symbol) {
+        return impl_->cancelAllOrders(symbol);
+    }
     Order fetchOrder(const std::string& symbol, const std::string& orderId) {
         return impl_->fetchOrder(symbol, orderId);
     }
@@ -71,6 +74,9 @@ public:
         return impl_->fetchMyTrades(symbol, limit);
     }
     std::map<std::string, double> fetchBalance() { return impl_->fetchBalance(); }
+    TradingFees fetchTradingFees(const std::string& symbol) {
+        return impl_->fetchTradingFees(symbol);
+    }
     AccountInfo fetchAccountInfo() { return impl_->fetchAccountInfo(); }
 
 private:

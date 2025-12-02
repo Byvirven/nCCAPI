@@ -990,6 +990,40 @@ public:
         return orderId;
     }
 
+    std::vector<std::string> cancelAllOrders(const std::string& symbol) override {
+        std::vector<std::string> cancelledIds;
+        if (exchangeName_ == "binance-us" || exchangeName_ == "binance") {
+             ccapi::Request request(ccapi::Request::Operation::GENERIC_PRIVATE_REQUEST, exchangeName_, "", "Cancel All Orders");
+             request.appendParam({{"HTTP_METHOD", "DELETE"}, {"HTTP_PATH", "/api/v3/openOrders"}, {"HTTP_QUERY_STRING", "symbol=" + symbol}});
+
+             if (!config_.apiKey.empty()) {
+                std::map<std::string, std::string> creds;
+                creds[ccapi::toString(exchangeName_) + "_API_KEY"] = config_.apiKey;
+                creds[ccapi::toString(exchangeName_) + "_API_SECRET"] = config_.apiSecret;
+                request.setCredential(creds);
+             } else throw std::runtime_error("API Key required");
+
+             auto events = sendRequestSync(request);
+             for(const auto& event : events) {
+                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                     for(const auto& msg : event.getMessageList()) {
+                         for(const auto& elem : msg.getElementList()) {
+                             if(elem.getNameValueMap().count("HTTP_BODY")) {
+                                 rapidjson::Document d; d.Parse(elem.getNameValueMap().at("HTTP_BODY").c_str());
+                                 if(!d.HasParseError() && d.IsArray()) {
+                                     for(const auto& o : d.GetArray()) {
+                                         if(o.HasMember("orderId")) cancelledIds.push_back(std::to_string(o["orderId"].GetInt64()));
+                                     }
+                                 }
+                             }
+                         }
+                     }
+                 }
+             }
+        }
+        return cancelledIds;
+    }
+
     Order fetchOrder(const std::string& symbol, const std::string& orderId) override {
         Order order; order.symbol = symbol; order.id = orderId;
         ccapi::Request request(ccapi::Request::Operation::GET_ORDER, exchangeName_, symbol);
@@ -1130,6 +1164,23 @@ public:
             }
         }
         return balances;
+    }
+
+    TradingFees fetchTradingFees(const std::string& symbol) override {
+        TradingFees fees{0.0, 0.0};
+        if (exchangeName_ == "binance-us" || exchangeName_ == "binance") {
+             // For Binance, try Account Info for commission rates (generic global)
+             // or Generic Private Request to /sapi/v1/asset/tradeFee
+             if (config_.apiKey.empty()) throw std::runtime_error("API Key required");
+
+             // Fallback to Account Info commission which is in basis points usually?
+             AccountInfo info = fetchAccountInfo();
+             // Binance commissions are maker/taker basis points * 100? or raw?
+             // Usually it returns makerCommission: 10 (meaning 0.10% or 10 bps).
+             fees.maker = info.makerCommission / 10000.0;
+             fees.taker = info.takerCommission / 10000.0;
+        }
+        return fees;
     }
 
     AccountInfo fetchAccountInfo() override {

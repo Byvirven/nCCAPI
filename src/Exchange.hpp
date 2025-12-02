@@ -120,6 +120,11 @@ struct ExchangeConfig {
     std::string passphrase;
 };
 
+struct TradingFees {
+    double maker;
+    double taker;
+};
+
 class Exchange {
 public:
     virtual ~Exchange() = default;
@@ -168,10 +173,12 @@ public:
     // REST - Private
     virtual std::string createOrder(const std::string& symbol, const std::string& side, double amount, double price = 0.0) = 0;
     virtual std::string cancelOrder(const std::string& symbol, const std::string& orderId) = 0;
+    virtual std::vector<std::string> cancelAllOrders(const std::string& symbol) = 0;
     virtual Order fetchOrder(const std::string& symbol, const std::string& orderId) = 0;
     virtual std::vector<Order> fetchOpenOrders(const std::string& symbol) = 0;
     virtual std::vector<Trade> fetchMyTrades(const std::string& symbol, int limit = 100) = 0;
     virtual std::map<std::string, double> fetchBalance() = 0;
+    virtual TradingFees fetchTradingFees(const std::string& symbol) = 0;
 
     // New Private
     virtual AccountInfo fetchAccountInfo() = 0;

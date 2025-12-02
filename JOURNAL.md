@@ -118,3 +118,19 @@
         - Ajout du callback `setOnOHLCV` pour l'affichage verbeux.
 - **Validation**:
     - Les tests `test_ascendex` et `test_binance_us` valident désormais la réception des flux Ticker, OrderBook et OHLCV pour plusieurs paires.
+
+## Extension des Fonctionnalités Pertinentes (CancelAll, Fees)
+- **Objectif**: Ajouter des fonctionnalités manquantes mais pertinentes pour un wrapper complet type CCXT.
+- **Ajouts**:
+    - `cancelAllOrders(symbol)`: Permet d'annuler tous les ordres ouverts pour une paire.
+    - `fetchTradingFees(symbol)`: Récupère les frais de trading (maker/taker).
+- **Implémentation**:
+    - **Interface `Exchange`**: Ajout des méthodes virtuelles pures et de la structure `TradingFees`.
+    - **`GenericExchange` (BinanceUS)**:
+        - `cancelAllOrders`: Utilisation de `DELETE /api/v3/openOrders`.
+        - `fetchTradingFees`: Dérivation des frais depuis `AccountInfo` (commissions).
+    - **`AscendexExchange`**:
+        - `cancelAllOrders`: Utilisation de `DELETE /api/pro/v1/cash/order/all`.
+        - `fetchTradingFees`: Parsing de `GET /api/pro/v1/spot/fee`.
+- **Validation**:
+    - Tests unitaires ajoutés dans `common.hpp` pour vérifier l'appel de ces méthodes (validation par échec "API Key required" sécurisé).

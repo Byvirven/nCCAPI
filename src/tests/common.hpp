@@ -229,6 +229,24 @@ inline void run_exchange_test(const std::string& exchange_name, bool verbose = f
             std::cout << "  Expected Failure: " << e.what() << std::endl;
         }
 
+        // 16. Cancel All Orders (Private Check)
+        std::cout << "[Step 16] Cancel All Orders (Private Check)..." << std::endl;
+        try {
+            exchange.cancelAllOrders(symbol);
+            std::cerr << "  ERROR: Should have failed (no key)." << std::endl;
+        } catch(const std::exception& e) {
+            std::cout << "  Expected Failure: " << e.what() << std::endl;
+        }
+
+        // 17. Trading Fees (Private Check)
+        std::cout << "[Step 17] Trading Fees (Private Check)..." << std::endl;
+        try {
+            exchange.fetchTradingFees(symbol);
+            std::cerr << "  ERROR: Should have failed (no key)." << std::endl;
+        } catch(const std::exception& e) {
+            std::cout << "  Expected Failure: " << e.what() << std::endl;
+        }
+
         // 12. WS Subscriptions
         std::cout << "[Step 12] WS Subscriptions (Public + Private)..." << std::endl;
         std::atomic<int> updates{0};
