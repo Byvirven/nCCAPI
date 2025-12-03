@@ -1,2 +1,11 @@
-external/include/
+
 build/
+boost/
+rapidjson/
+boost-prefix/
+rapidjson-prefix/
+src_probe/
+analysis/
+*.a
+*.so
+*.o
