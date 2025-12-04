@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class Bitfinex : public Exchange {
 public:
-    Bitfinex();
+    Bitfinex(std::shared_ptr<UnifiedSession> session);
     ~Bitfinex() override;
 
     std::vector<Instrument> get_instruments() override;

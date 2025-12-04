@@ -3,7 +3,7 @@
 #include <thread>
 #include <chrono>
 
-#include "nccapi/sessions/bitget-futures_session.hpp"
+#include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
@@ -12,11 +12,7 @@ namespace nccapi {
 
 class BitgetFutures::Impl {
 public:
-    Impl() {
-        ccapi::SessionOptions options;
-        ccapi::SessionConfigs configs;
-        session = std::make_unique<BitgetFuturesSession>(options, configs);
-    }
+    Impl(std::shared_ptr<UnifiedSession> s) : session(s) {}
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
@@ -75,10 +71,10 @@ public:
     }
 
 private:
-    std::unique_ptr<BitgetFuturesSession> session;
+    std::shared_ptr<UnifiedSession> session;
 };
 
-BitgetFutures::BitgetFutures() : pimpl(std::make_unique<Impl>()) {}
+BitgetFutures::BitgetFutures(std::shared_ptr<UnifiedSession> session) : pimpl(std::make_unique<Impl>(session)) {}
 BitgetFutures::~BitgetFutures() = default;
 
 std::vector<Instrument> BitgetFutures::get_instruments() {

@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class Cryptocom : public Exchange {
 public:
-    Cryptocom();
+    Cryptocom(std::shared_ptr<UnifiedSession> session);
     ~Cryptocom() override;
 
     std::vector<Instrument> get_instruments() override;

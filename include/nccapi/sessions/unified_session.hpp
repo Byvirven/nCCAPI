@@ -1,10 +1,11 @@
-#ifndef NCCAPI_DERIBIT_SESSION_HPP
-#define NCCAPI_DERIBIT_SESSION_HPP
+#ifndef NCCAPI_UNIFIED_SESSION_HPP
+#define NCCAPI_UNIFIED_SESSION_HPP
 
 #include "ccapi_cpp/ccapi_session_configs.h"
 #include "ccapi_cpp/ccapi_session_options.h"
 #include "ccapi_cpp/ccapi_subscription.h"
 
+// Forward declare Request and Queue/Event
 namespace ccapi {
     class Session;
     class EventHandler;
@@ -19,13 +20,14 @@ namespace ccapi {
 
 namespace nccapi {
 
-class DeribitSession {
+class UnifiedSession {
 public:
-    DeribitSession(const ccapi::SessionOptions& options, const ccapi::SessionConfigs& configs, ccapi::EventHandler* eventHandler = nullptr);
-    ~DeribitSession();
+    UnifiedSession(const ccapi::SessionOptions& options, const ccapi::SessionConfigs& configs, ccapi::EventHandler* eventHandler = nullptr);
+    ~UnifiedSession();
 
     void sendRequest(ccapi::Request& request);
     void stop();
+
     ccapi::Queue<ccapi::Event>& getEventQueue();
 
 private:

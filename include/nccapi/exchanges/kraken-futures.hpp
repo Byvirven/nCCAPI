@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class KrakenFutures : public Exchange {
 public:
-    KrakenFutures();
+    KrakenFutures(std::shared_ptr<UnifiedSession> session);
     ~KrakenFutures() override;
 
     std::vector<Instrument> get_instruments() override;

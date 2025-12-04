@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class Binance : public Exchange {
 public:
-    Binance();
+    Binance(std::shared_ptr<UnifiedSession> session);
     ~Binance() override;
 
     std::vector<Instrument> get_instruments() override;

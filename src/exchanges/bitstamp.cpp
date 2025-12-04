@@ -3,7 +3,7 @@
 #include <thread>
 #include <chrono>
 
-#include "nccapi/sessions/bitstamp_session.hpp"
+#include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
@@ -12,11 +12,7 @@ namespace nccapi {
 
 class Bitstamp::Impl {
 public:
-    Impl() {
-        ccapi::SessionOptions options;
-        ccapi::SessionConfigs configs;
-        session = std::make_unique<BitstampSession>(options, configs);
-    }
+    Impl(std::shared_ptr<UnifiedSession> s) : session(s) {}
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
@@ -72,10 +68,10 @@ public:
     }
 
 private:
-    std::unique_ptr<BitstampSession> session;
+    std::shared_ptr<UnifiedSession> session;
 };
 
-Bitstamp::Bitstamp() : pimpl(std::make_unique<Impl>()) {}
+Bitstamp::Bitstamp(std::shared_ptr<UnifiedSession> session) : pimpl(std::make_unique<Impl>(session)) {}
 Bitstamp::~Bitstamp() = default;
 
 std::vector<Instrument> Bitstamp::get_instruments() {

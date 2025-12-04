@@ -5,7 +5,7 @@
 #include <vector>
 #include <string>
 
-#include "nccapi/sessions/okx_session.hpp"
+#include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
@@ -14,11 +14,7 @@ namespace nccapi {
 
 class Okx::Impl {
 public:
-    Impl() {
-        ccapi::SessionOptions options;
-        ccapi::SessionConfigs configs;
-        session = std::make_unique<OkxSession>(options, configs);
-    }
+    Impl(std::shared_ptr<UnifiedSession> s) : session(s) {}
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> all_instruments;
@@ -35,7 +31,7 @@ public:
     }
 
 private:
-    std::unique_ptr<OkxSession> session;
+    std::shared_ptr<UnifiedSession> session;
 
     std::vector<Instrument> fetch_instruments_by_type(const std::string& instType) {
         std::vector<Instrument> instruments;
@@ -119,7 +115,7 @@ private:
     }
 };
 
-Okx::Okx() : pimpl(std::make_unique<Impl>()) {}
+Okx::Okx(std::shared_ptr<UnifiedSession> session) : pimpl(std::make_unique<Impl>(session)) {}
 Okx::~Okx() = default;
 
 std::vector<Instrument> Okx::get_instruments() {

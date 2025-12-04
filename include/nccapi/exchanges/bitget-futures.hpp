@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class BitgetFutures : public Exchange {
 public:
-    BitgetFutures();
+    BitgetFutures(std::shared_ptr<UnifiedSession> session);
     ~BitgetFutures() override;
 
     std::vector<Instrument> get_instruments() override;

@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class Bybit : public Exchange {
 public:
-    Bybit();
+    Bybit(std::shared_ptr<UnifiedSession> session);
     ~Bybit() override;
 
     std::vector<Instrument> get_instruments() override;

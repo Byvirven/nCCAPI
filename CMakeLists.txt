@@ -27,7 +27,9 @@ include_directories(${RAPIDJSON_INCLUDE_DIR})
 
 # Library Sources
 file(GLOB EXCHANGE_SOURCES "src/exchanges/*.cpp")
-file(GLOB SESSION_SOURCES "src/sessions/*.cpp")
+# Unified Session (One file to compile them all!)
+set(SESSION_SOURCES "src/sessions/unified_session.cpp")
+
 set(SOURCES
     src/client.cpp
     ${EXCHANGE_SOURCES}
@@ -43,39 +45,6 @@ endif()
 if (TARGET rapidjson)
     add_dependencies(nccapi rapidjson)
 endif()
-
-# Apply exchange-specific definitions to the specific SESSION source file ONLY
-set_property(SOURCE src/sessions/kucoin-futures_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_KUCOIN_FUTURES)
-set_property(SOURCE src/sessions/gateio_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_GATEIO)
-set_property(SOURCE src/sessions/bitmart_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BITMART)
-set_property(SOURCE src/sessions/binance-coin-futures_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BINANCE_COIN_FUTURES)
-set_property(SOURCE src/sessions/huobi-usdt-swap_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_HUOBI_USDT_SWAP)
-set_property(SOURCE src/sessions/erisx_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_ERISX)
-set_property(SOURCE src/sessions/ascendex_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_ASCENDEX)
-set_property(SOURCE src/sessions/bitmex_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BITMEX)
-set_property(SOURCE src/sessions/huobi-coin-swap_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_HUOBI_COIN_SWAP)
-set_property(SOURCE src/sessions/bitfinex_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BITFINEX)
-# Enable BINANCE base macro as well for BinanceUS (Needed for base class MarketDataServiceBinanceBase)
-set_property(SOURCE src/sessions/binance-us_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BINANCE_US CCAPI_ENABLE_EXCHANGE_BINANCE)
-set_property(SOURCE src/sessions/kraken-futures_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_KRAKEN_FUTURES)
-set_property(SOURCE src/sessions/coinbase_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_COINBASE)
-set_property(SOURCE src/sessions/mexc_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_MEXC)
-set_property(SOURCE src/sessions/whitebit_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_WHITEBIT)
-set_property(SOURCE src/sessions/mexc-futures_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_MEXC_FUTURES)
-set_property(SOURCE src/sessions/kucoin_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_KUCOIN)
-set_property(SOURCE src/sessions/bitget-futures_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BITGET_FUTURES)
-set_property(SOURCE src/sessions/huobi_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_HUOBI)
-set_property(SOURCE src/sessions/deribit_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_DERIBIT)
-set_property(SOURCE src/sessions/gateio-perpetual-futures_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_GATEIO_PERPETUAL_FUTURES)
-set_property(SOURCE src/sessions/kraken_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_KRAKEN)
-set_property(SOURCE src/sessions/bybit_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BYBIT)
-set_property(SOURCE src/sessions/okx_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_OKX)
-set_property(SOURCE src/sessions/gemini_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_GEMINI)
-set_property(SOURCE src/sessions/bitstamp_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BITSTAMP)
-set_property(SOURCE src/sessions/cryptocom_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_CRYPTOCOM)
-set_property(SOURCE src/sessions/binance_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BINANCE)
-set_property(SOURCE src/sessions/binance-usds-futures_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BINANCE_USDS_FUTURES)
-set_property(SOURCE src/sessions/bitget_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BITGET)
 
 # Test Executable
 add_executable(test_structure tests/test_structure.cpp)

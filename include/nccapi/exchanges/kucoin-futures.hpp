@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class KucoinFutures : public Exchange {
 public:
-    KucoinFutures();
+    KucoinFutures(std::shared_ptr<UnifiedSession> session);
     ~KucoinFutures() override;
 
     std::vector<Instrument> get_instruments() override;

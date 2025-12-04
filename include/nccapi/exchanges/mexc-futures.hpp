@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class MexcFutures : public Exchange {
 public:
-    MexcFutures();
+    MexcFutures(std::shared_ptr<UnifiedSession> session);
     ~MexcFutures() override;
 
     std::vector<Instrument> get_instruments() override;

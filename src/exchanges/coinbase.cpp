@@ -3,7 +3,7 @@
 #include <thread>
 #include <chrono>
 
-#include "nccapi/sessions/coinbase_session.hpp"
+#include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
@@ -12,11 +12,7 @@ namespace nccapi {
 
 class Coinbase::Impl {
 public:
-    Impl() {
-        ccapi::SessionOptions options;
-        ccapi::SessionConfigs configs;
-        session = std::make_unique<CoinbaseSession>(options, configs);
-    }
+    Impl(std::shared_ptr<UnifiedSession> s) : session(s) {}
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
@@ -73,10 +69,10 @@ public:
     }
 
 private:
-    std::unique_ptr<CoinbaseSession> session;
+    std::shared_ptr<UnifiedSession> session;
 };
 
-Coinbase::Coinbase() : pimpl(std::make_unique<Impl>()) {}
+Coinbase::Coinbase(std::shared_ptr<UnifiedSession> session) : pimpl(std::make_unique<Impl>(session)) {}
 Coinbase::~Coinbase() = default;
 
 std::vector<Instrument> Coinbase::get_instruments() {

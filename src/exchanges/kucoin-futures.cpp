@@ -3,7 +3,7 @@
 #include <thread>
 #include <chrono>
 
-#include "nccapi/sessions/kucoin-futures_session.hpp"
+#include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
@@ -12,11 +12,7 @@ namespace nccapi {
 
 class KucoinFutures::Impl {
 public:
-    Impl() {
-        ccapi::SessionOptions options;
-        ccapi::SessionConfigs configs;
-        session = std::make_unique<KucoinFuturesSession>(options, configs);
-    }
+    Impl(std::shared_ptr<UnifiedSession> s) : session(s) {}
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
@@ -75,10 +71,10 @@ public:
     }
 
 private:
-    std::unique_ptr<KucoinFuturesSession> session;
+    std::shared_ptr<UnifiedSession> session;
 };
 
-KucoinFutures::KucoinFutures() : pimpl(std::make_unique<Impl>()) {}
+KucoinFutures::KucoinFutures(std::shared_ptr<UnifiedSession> session) : pimpl(std::make_unique<Impl>(session)) {}
 KucoinFutures::~KucoinFutures() = default;
 
 std::vector<Instrument> KucoinFutures::get_instruments() {

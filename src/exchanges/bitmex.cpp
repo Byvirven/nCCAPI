@@ -3,7 +3,7 @@
 #include <thread>
 #include <chrono>
 
-#include "nccapi/sessions/bitmex_session.hpp"
+#include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
@@ -12,11 +12,7 @@ namespace nccapi {
 
 class Bitmex::Impl {
 public:
-    Impl() {
-        ccapi::SessionOptions options;
-        ccapi::SessionConfigs configs;
-        session = std::make_unique<BitmexSession>(options, configs);
-    }
+    Impl(std::shared_ptr<UnifiedSession> s) : session(s) {}
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
@@ -76,10 +72,10 @@ public:
     }
 
 private:
-    std::unique_ptr<BitmexSession> session;
+    std::shared_ptr<UnifiedSession> session;
 };
 
-Bitmex::Bitmex() : pimpl(std::make_unique<Impl>()) {}
+Bitmex::Bitmex(std::shared_ptr<UnifiedSession> session) : pimpl(std::make_unique<Impl>(session)) {}
 Bitmex::~Bitmex() = default;
 
 std::vector<Instrument> Bitmex::get_instruments() {

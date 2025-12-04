@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class Gateio : public Exchange {
 public:
-    Gateio();
+    Gateio(std::shared_ptr<UnifiedSession> session);
     ~Gateio() override;
 
     std::vector<Instrument> get_instruments() override;

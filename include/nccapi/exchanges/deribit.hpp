@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class Deribit : public Exchange {
 public:
-    Deribit();
+    Deribit(std::shared_ptr<UnifiedSession> session);
     ~Deribit() override;
 
     std::vector<Instrument> get_instruments() override;

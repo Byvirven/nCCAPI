@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class Bitstamp : public Exchange {
 public:
-    Bitstamp();
+    Bitstamp(std::shared_ptr<UnifiedSession> session);
     ~Bitstamp() override;
 
     std::vector<Instrument> get_instruments() override;

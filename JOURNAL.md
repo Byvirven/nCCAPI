@@ -15,24 +15,20 @@
 ## 3. Implémentation `GET_INSTRUMENTS`
 - Implémentation réussie de `get_instruments()` pour la quasi-totalité des exchanges.
 
-## 4. Optimisation Drastique du Temps de Compilation
-- **Problème** : Chaque modification de la logique d'un exchange entraînait la recompilation de tout le fichier, y compris les templates CCAPI (1m30s par fichier).
-- **Solution** : Adoption de la stratégie "Reduce Build Time" recommandée par CCAPI.
-    - Séparation du code en deux parties : `src/sessions/` (lourd) et `src/exchanges/` (léger).
-    - Automatisation de la migration via un script Python.
+## 4. Résolution du Problème Binance US
+- **Problème** : Erreur `-1104` lors de la récupération des instruments.
+- **Solution** : Remplacement de l'appel standard par une `GENERIC_PUBLIC_REQUEST` manuelle vers `/api/v3/exchangeInfo`, avec parsing JSON robuste.
+- **Résultat** : Fonctionnel (612 instruments).
 
-## 5. Résolution du Problème Binance US
-- **Problème** : L'implémentation standard de CCAPI pour `GET_INSTRUMENTS` sur Binance US échouait avec une erreur `-1104` et crashait lors de la destruction de l'objet.
-- **Diagnostic & Correctifs** :
-    1.  **Erreur API (-1104)** : Utilisation d'une `GENERIC_PUBLIC_REQUEST` manuelle vers `/api/v3/exchangeInfo` pour éviter les paramètres par défaut de CCAPI incompatibles.
-    2.  **Dépendance de Compilation** : Activation de `CCAPI_ENABLE_EXCHANGE_BINANCE` (Base) en plus de `_BINANCE_US` dans la session pour satisfaire les dépendances internes de CCAPI.
-    3.  **Crash à la fermeture** : Ajout de `session->stop()` explicite dans le destructeur de `BinanceUsSession` avant le `delete` pour assurer un nettoyage propre des threads `boost::asio`.
-- **Validation** : Test isolé réussi (612 instruments récupérés).
-- **Performance** :
-    - Compilation logique (`binance-us.cpp`) : **~14s** (vs ~3m pour le test complet initial).
-    - Compilation session (`binance-us_session.cpp`) : **~3m** (plus lourd que la moyenne car double instanciation Base+US, mais ne se fait qu'une fois).
-    - Comparatif : `binance.cpp` logique ~4s, session ~1m17s. L'overhead pour US est acceptable vu la complexité résolue.
+## 5. Optimisation Finale de l'Architecture (Unified Session)
+- **Constat** : L'approche "Une session par exchange" (optimisation initiale) restait trop lente à compiler globalement (30 fichiers x 1m30s = 45 minutes).
+- **Innovation** : Transition vers une architecture **Unified Session**.
+    - Une seule classe `UnifiedSession` instancie `ccapi::Session` avec **tous** les exchanges activés.
+    - Ce fichier unique (`src/sessions/unified_session.cpp`) prend environ **2m30s** à compiler.
+    - Tous les autres fichiers (`src/exchanges/*.cpp`) sont légers et compilent en **~3 secondes** chacun.
+    - `nccapi::Client` instancie cette session unique et la partage (Dependency Injection) avec toutes les instances d'`Exchange`.
+- **Gain de Performance** : Temps de compilation total pour un rebuild complet passé de **~45 minutes** à **~4 minutes**.
 
 ## Prochaines Étapes
 - Investiguer et corriger l'implémentation de `Bybit`.
-- Implémenter les méthodes de Market Data (Ticker, OrderBook, Trades).
+- Implémenter les méthodes de Market Data (Ticker, OrderBook, Trades) en utilisant cette nouvelle architecture unifiée.

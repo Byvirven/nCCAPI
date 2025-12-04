@@ -3,7 +3,7 @@
 #include <thread>
 #include <chrono>
 
-#include "nccapi/sessions/deribit_session.hpp"
+#include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
@@ -12,11 +12,7 @@ namespace nccapi {
 
 class Deribit::Impl {
 public:
-    Impl() {
-        ccapi::SessionOptions options;
-        ccapi::SessionConfigs configs;
-        session = std::make_unique<DeribitSession>(options, configs);
-    }
+    Impl(std::shared_ptr<UnifiedSession> s) : session(s) {}
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
@@ -87,10 +83,10 @@ public:
     }
 
 private:
-    std::unique_ptr<DeribitSession> session;
+    std::shared_ptr<UnifiedSession> session;
 };
 
-Deribit::Deribit() : pimpl(std::make_unique<Impl>()) {}
+Deribit::Deribit(std::shared_ptr<UnifiedSession> session) : pimpl(std::make_unique<Impl>(session)) {}
 Deribit::~Deribit() = default;
 
 std::vector<Instrument> Deribit::get_instruments() {

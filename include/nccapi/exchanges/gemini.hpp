@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class Gemini : public Exchange {
 public:
-    Gemini();
+    Gemini(std::shared_ptr<UnifiedSession> session);
     ~Gemini() override;
 
     std::vector<Instrument> get_instruments() override;

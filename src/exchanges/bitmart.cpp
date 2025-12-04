@@ -3,7 +3,7 @@
 #include <thread>
 #include <chrono>
 
-#include "nccapi/sessions/bitmart_session.hpp"
+#include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
@@ -12,11 +12,7 @@ namespace nccapi {
 
 class Bitmart::Impl {
 public:
-    Impl() {
-        ccapi::SessionOptions options;
-        ccapi::SessionConfigs configs;
-        session = std::make_unique<BitmartSession>(options, configs);
-    }
+    Impl(std::shared_ptr<UnifiedSession> s) : session(s) {}
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
@@ -72,10 +68,10 @@ public:
     }
 
 private:
-    std::unique_ptr<BitmartSession> session;
+    std::shared_ptr<UnifiedSession> session;
 };
 
-Bitmart::Bitmart() : pimpl(std::make_unique<Impl>()) {}
+Bitmart::Bitmart(std::shared_ptr<UnifiedSession> session) : pimpl(std::make_unique<Impl>(session)) {}
 Bitmart::~Bitmart() = default;
 
 std::vector<Instrument> Bitmart::get_instruments() {

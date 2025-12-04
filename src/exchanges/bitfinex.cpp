@@ -3,7 +3,7 @@
 #include <thread>
 #include <chrono>
 
-#include "nccapi/sessions/bitfinex_session.hpp"
+#include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
@@ -12,11 +12,7 @@ namespace nccapi {
 
 class Bitfinex::Impl {
 public:
-    Impl() {
-        ccapi::SessionOptions options;
-        ccapi::SessionConfigs configs;
-        session = std::make_unique<BitfinexSession>(options, configs);
-    }
+    Impl(std::shared_ptr<UnifiedSession> s) : session(s) {}
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
@@ -68,10 +64,10 @@ public:
     }
 
 private:
-    std::unique_ptr<BitfinexSession> session;
+    std::shared_ptr<UnifiedSession> session;
 };
 
-Bitfinex::Bitfinex() : pimpl(std::make_unique<Impl>()) {}
+Bitfinex::Bitfinex(std::shared_ptr<UnifiedSession> session) : pimpl(std::make_unique<Impl>(session)) {}
 Bitfinex::~Bitfinex() = default;
 
 std::vector<Instrument> Bitfinex::get_instruments() {

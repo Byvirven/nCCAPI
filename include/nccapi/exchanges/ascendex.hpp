@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class Ascendex : public Exchange {
 public:
-    Ascendex();
+    Ascendex(std::shared_ptr<UnifiedSession> session);
     ~Ascendex() override;
 
     std::vector<Instrument> get_instruments() override;

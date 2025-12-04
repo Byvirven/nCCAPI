@@ -3,7 +3,7 @@
 #include <thread>
 #include <chrono>
 
-#include "nccapi/sessions/huobi-coin-swap_session.hpp"
+#include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
@@ -12,11 +12,7 @@ namespace nccapi {
 
 class HuobiCoinSwap::Impl {
 public:
-    Impl() {
-        ccapi::SessionOptions options;
-        ccapi::SessionConfigs configs;
-        session = std::make_unique<HuobiCoinSwapSession>(options, configs);
-    }
+    Impl(std::shared_ptr<UnifiedSession> s) : session(s) {}
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
@@ -75,10 +71,10 @@ public:
     }
 
 private:
-    std::unique_ptr<HuobiCoinSwapSession> session;
+    std::shared_ptr<UnifiedSession> session;
 };
 
-HuobiCoinSwap::HuobiCoinSwap() : pimpl(std::make_unique<Impl>()) {}
+HuobiCoinSwap::HuobiCoinSwap(std::shared_ptr<UnifiedSession> session) : pimpl(std::make_unique<Impl>(session)) {}
 HuobiCoinSwap::~HuobiCoinSwap() = default;
 
 std::vector<Instrument> HuobiCoinSwap::get_instruments() {

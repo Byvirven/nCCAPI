@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class Erisx : public Exchange {
 public:
-    Erisx();
+    Erisx(std::shared_ptr<UnifiedSession> session);
     ~Erisx() override;
 
     std::vector<Instrument> get_instruments() override;

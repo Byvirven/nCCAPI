@@ -3,7 +3,7 @@
 #include <thread>
 #include <chrono>
 
-#include "nccapi/sessions/cryptocom_session.hpp"
+#include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
@@ -12,11 +12,7 @@ namespace nccapi {
 
 class Cryptocom::Impl {
 public:
-    Impl() {
-        ccapi::SessionOptions options;
-        ccapi::SessionConfigs configs;
-        session = std::make_unique<CryptocomSession>(options, configs);
-    }
+    Impl(std::shared_ptr<UnifiedSession> s) : session(s) {}
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
@@ -72,10 +68,10 @@ public:
     }
 
 private:
-    std::unique_ptr<CryptocomSession> session;
+    std::shared_ptr<UnifiedSession> session;
 };
 
-Cryptocom::Cryptocom() : pimpl(std::make_unique<Impl>()) {}
+Cryptocom::Cryptocom(std::shared_ptr<UnifiedSession> session) : pimpl(std::make_unique<Impl>(session)) {}
 Cryptocom::~Cryptocom() = default;
 
 std::vector<Instrument> Cryptocom::get_instruments() {

@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class Bitmart : public Exchange {
 public:
-    Bitmart();
+    Bitmart(std::shared_ptr<UnifiedSession> session);
     ~Bitmart() override;
 
     std::vector<Instrument> get_instruments() override;

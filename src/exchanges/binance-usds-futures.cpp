@@ -3,7 +3,7 @@
 #include <thread>
 #include <chrono>
 
-#include "nccapi/sessions/binance-usds-futures_session.hpp"
+#include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
@@ -12,11 +12,7 @@ namespace nccapi {
 
 class BinanceUsdsFutures::Impl {
 public:
-    Impl() {
-        ccapi::SessionOptions options;
-        ccapi::SessionConfigs configs;
-        session = std::make_unique<BinanceUsdsFuturesSession>(options, configs);
-    }
+    Impl(std::shared_ptr<UnifiedSession> s) : session(s) {}
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
@@ -78,10 +74,10 @@ public:
     }
 
 private:
-    std::unique_ptr<BinanceUsdsFuturesSession> session;
+    std::shared_ptr<UnifiedSession> session;
 };
 
-BinanceUsdsFutures::BinanceUsdsFutures() : pimpl(std::make_unique<Impl>()) {}
+BinanceUsdsFutures::BinanceUsdsFutures(std::shared_ptr<UnifiedSession> session) : pimpl(std::make_unique<Impl>(session)) {}
 BinanceUsdsFutures::~BinanceUsdsFutures() = default;
 
 std::vector<Instrument> BinanceUsdsFutures::get_instruments() {

@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class Bitmex : public Exchange {
 public:
-    Bitmex();
+    Bitmex(std::shared_ptr<UnifiedSession> session);
     ~Bitmex() override;
 
     std::vector<Instrument> get_instruments() override;

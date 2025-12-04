@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class Huobi : public Exchange {
 public:
-    Huobi();
+    Huobi(std::shared_ptr<UnifiedSession> session);
     ~Huobi() override;
 
     std::vector<Instrument> get_instruments() override;

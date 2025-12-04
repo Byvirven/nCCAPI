@@ -3,7 +3,7 @@
 #include <thread>
 #include <chrono>
 
-#include "nccapi/sessions/ascendex_session.hpp"
+#include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
@@ -12,11 +12,7 @@ namespace nccapi {
 
 class Ascendex::Impl {
 public:
-    Impl() {
-        ccapi::SessionOptions options;
-        ccapi::SessionConfigs configs;
-        session = std::make_unique<AscendexSession>(options, configs);
-    }
+    Impl(std::shared_ptr<UnifiedSession> s) : session(s) {}
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
@@ -69,10 +65,10 @@ public:
     }
 
 private:
-    std::unique_ptr<AscendexSession> session;
+    std::shared_ptr<UnifiedSession> session;
 };
 
-Ascendex::Ascendex() : pimpl(std::make_unique<Impl>()) {}
+Ascendex::Ascendex(std::shared_ptr<UnifiedSession> session) : pimpl(std::make_unique<Impl>(session)) {}
 Ascendex::~Ascendex() = default;
 
 std::vector<Instrument> Ascendex::get_instruments() {

@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class Okx : public Exchange {
 public:
-    Okx();
+    Okx(std::shared_ptr<UnifiedSession> session);
     ~Okx() override;
 
     std::vector<Instrument> get_instruments() override;

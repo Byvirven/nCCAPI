@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class GateioPerpetualFutures : public Exchange {
 public:
-    GateioPerpetualFutures();
+    GateioPerpetualFutures(std::shared_ptr<UnifiedSession> session);
     ~GateioPerpetualFutures() override;
 
     std::vector<Instrument> get_instruments() override;

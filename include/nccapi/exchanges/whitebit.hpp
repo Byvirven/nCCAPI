@@ -6,9 +6,11 @@
 
 namespace nccapi {
 
+class UnifiedSession;
+
 class Whitebit : public Exchange {
 public:
-    Whitebit();
+    Whitebit(std::shared_ptr<UnifiedSession> session);
     ~Whitebit() override;
 
     std::vector<Instrument> get_instruments() override;
