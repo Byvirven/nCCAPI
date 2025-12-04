@@ -6,30 +6,24 @@
 - Contraintes identifiées : Compilation très lourde en mémoire (interdiction du parallélisme `make -j`).
 
 ## 2. Refactorisation Majeure : Architecture Client/Exchange
-- **Objectif** : Abandonner l'ancienne classe monolithique `UnifiedExchange` au profit d'une architecture modulaire et extensible.
+- **Objectif** : Abandonner l'ancienne classe monolithique `UnifiedExchange` au profit d'une architecture modulaire.
 - **Réalisation** :
-    - Création de `nccapi::Client` comme point d'entrée unique (Façade/Factory).
-    - Création de l'interface `nccapi::Exchange` définissant le contrat standard (ex: `get_instruments`).
-    - Implémentation du pattern **Pimpl** (Pointer to Implementation) pour chaque exchange. Cela permet d'isoler le code lourd de CCAPI dans les fichiers `.cpp` (`src/exchanges/`) et de garder les headers (`include/nccapi/exchanges/`) légers.
+    - Création de `nccapi::Client` comme point d'entrée unique.
+    - Création de l'interface `nccapi::Exchange`.
+    - Implémentation du pattern Pimpl.
 
-## 3. Implémentation `GET_INSTRUMENTS` (Refactorisation Actuelle)
-- **Objectif** : Uniformiser la récupération de la liste des paires de trading (Instruments) pour tous les exchanges supportés.
-- **Résultats** :
-    - Implémentation réussie de `get_instruments()` pour la quasi-totalité des exchanges supportés par CCAPI (voir liste dans README).
-    - La méthode retourne un vecteur normalisé de structures `Instrument` (Symbole, Base, Quote).
-    - **Test de validation** : Binance (Global) est fonctionnel (validé hors environnement géobloqué).
-- **Problèmes Identifiés** :
-    - **Géoblocage** : Binance Global et Bybit sont inaccessibles depuis l'environnement de développement actuel.
-    - **Dysfonctionnements** :
-        - `Bybit` : Rencontre des erreurs lors de l'appel API.
-        - `Binance.US` : Rencontre des erreurs spécifiques à traiter ultérieurement.
+## 3. Implémentation `GET_INSTRUMENTS`
+- Implémentation réussie de `get_instruments()` pour la quasi-totalité des exchanges.
 
-## 4. Documentation
-- Réécriture complète du `README.md` pour refléter la nouvelle architecture (`nccapi::Client`).
-- Mise à jour des instructions de compilation (avertissement strict sur la mémoire).
-- Classification claire des exchanges supportés vs problématiques.
+## 4. Optimisation Drastique du Temps de Compilation
+- **Problème** : Chaque modification de la logique d'un exchange entraînait la recompilation de tout le fichier, y compris les templates CCAPI (1m30s par fichier).
+- **Solution** : Adoption de la stratégie "Reduce Build Time" recommandée par CCAPI.
+    - Séparation du code en deux parties :
+        1. `src/sessions/` : Instanciation lourde de `ccapi::Session`. Ces fichiers ne changent presque jamais.
+        2. `src/exchanges/` : Logique métier (parsing, requêtes). Ces fichiers sont légers.
+    - **Résultat** : Le temps de recompilation d'un fichier de logique (ex: `binance.cpp`) est passé de **~1m30s** à **~3s**.
+    - Automatisation de la migration pour les 30 exchanges via un script Python.
 
 ## Prochaines Étapes
 - Investiguer et corriger les implémentations de `Bybit` et `Binance.US`.
-- Implémenter les méthodes de Market Data (Ticker, OrderBook, Trades) dans la nouvelle architecture.
-- Ajouter le support WebSocket via la nouvelle architecture.
+- Implémenter les méthodes de Market Data (Ticker, OrderBook, Trades).

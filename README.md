@@ -7,7 +7,13 @@ A standardized, header-only C++ wrapper for the [Crypto-Chassis CCAPI](https://g
 *   **Unified Interface**: Access multiple exchanges (Binance, Coinbase, Kraken, OKX, etc.) through a single `nccapi::Client`.
 *   **Simplified Data Structures**: Standardized `Instrument` struct for trading pairs.
 *   **Header-Only Wrapper**: Easy integration (though dependencies must be linked).
-*   **Pimpl Idiom**: Hides heavy CCAPI compilation dependencies from your main application code.
+*   **Optimized Compilation**: Uses Pimpl and separate session compilation to drastically reduce build times during development.
+
+## Build Time Optimization
+
+This project employs a "Reduced Build Time" strategy. The heavy CCAPI template instantiations are isolated in `src/sessions/`, while the exchange logic resides in `src/exchanges/`.
+*   **Benefit**: Modifying logic in `src/exchanges/` only triggers a 3-5 second recompilation instead of 1-2 minutes.
+*   **Initial Build**: The first build will still be long as it must compile all session objects.
 
 ## Current Status (Refactoring Phase)
 
@@ -15,48 +21,12 @@ We are currently in a major refactoring phase to normalize the API.
 **Completed:**
 *   Global `get_instruments()` (Fetch Pairs) implementation for supported exchanges.
 *   Factory pattern via `nccapi::Client`.
+*   **Build Optimization**: Full split of Logic vs. CCAPI Session.
 
 **Known Issues:**
 *   **Binance (Global)**: Fully functional logic, but often geo-blocked in cloud/CI environments.
 *   **Bybit**: Currently non-functional.
 *   **Binance.US**: Currently non-functional.
-
-## Supported Exchanges
-
-The following exchanges have the `get_instruments()` method implemented:
-
-*   AscendEX
-*   Binance (Global) *
-*   Binance Coin Futures *
-*   Binance US *
-*   Binance USDS Futures *
-*   Bitfinex
-*   Bitget
-*   Bitget Futures
-*   Bitmart
-*   BitMEX
-*   Bitstamp
-*   Bybit *
-*   Coinbase
-*   Crypto.com
-*   Deribit
-*   ErisX
-*   Gate.io
-*   Gate.io Perpetual Futures
-*   Gemini
-*   Huobi
-*   Huobi Coin Swap
-*   Huobi USDT Swap
-*   Kraken
-*   Kraken Futures
-*   KuCoin
-*   KuCoin Futures
-*   MEXC
-*   MEXC Futures
-*   OKX
-*   WhiteBIT
-
-*See "Known Issues" above for exchanges marked with (*).*
 
 ## Dependencies & Installation
 
@@ -131,5 +101,5 @@ int main() {
 
 *   **`nccapi::Client`**: The entry point. Manages exchange instances.
 *   **`nccapi::Exchange`**: The abstract base class defining the interface.
-*   **`nccapi::Instrument`**: A unified structure representing a trading pair (Symbol, Base, Quote, etc.).
-*   **`src/exchanges/*.cpp`**: Implementation files hiding the CCAPI logic using the Pimpl (Pointer to Implementation) idiom to keep headers clean.
+*   **`src/exchanges/*.cpp`**: Lightweight logic implementations (Compile fast).
+*   **`src/sessions/*.cpp`**: Heavy CCAPI session wrappers (Compile once, slow).

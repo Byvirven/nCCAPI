@@ -2,112 +2,36 @@ cmake_minimum_required(VERSION 3.14)
 project(nccapi)
 
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -w") # Suppress warnings from CCAPI
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -w")
 
-# Includes
 include_directories(include)
 include_directories(external/ccapi/include)
 
-# Dependencies
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 find_package(ZLIB REQUIRED)
 
-# External Projects for dependencies (if missing)
 include(ExternalProject)
-
 if(NOT BOOST_INCLUDE_DIR)
-  ExternalProject_Add(
-    boost
-    URL https://archives.boost.io/release/1.87.0/source/boost_1_87_0.tar.gz
-    SOURCE_DIR "${CMAKE_BINARY_DIR}/boost"
-    CONFIGURE_COMMAND ""
-    BUILD_COMMAND ""
-    INSTALL_COMMAND ""
-    TEST_COMMAND "")
+  ExternalProject_Add(boost URL https://archives.boost.io/release/1.87.0/source/boost_1_87_0.tar.gz
+    SOURCE_DIR "${CMAKE_BINARY_DIR}/boost" CONFIGURE_COMMAND "" BUILD_COMMAND "" INSTALL_COMMAND "" TEST_COMMAND "")
   set(BOOST_INCLUDE_DIR "${CMAKE_BINARY_DIR}/boost")
 endif()
-
 if(NOT RAPIDJSON_INCLUDE_DIR)
-  ExternalProject_Add(
-    rapidjson
-    URL https://github.com/Tencent/rapidjson/archive/3b2441b87f99ab65f37b141a7b548ebadb607b96.tar.gz
-    SOURCE_DIR "${CMAKE_BINARY_DIR}/rapidjson"
-    CONFIGURE_COMMAND ""
-    BUILD_COMMAND ""
-    INSTALL_COMMAND ""
-    TEST_COMMAND "")
+  ExternalProject_Add(rapidjson URL https://github.com/Tencent/rapidjson/archive/3b2441b87f99ab65f37b141a7b548ebadb607b96.tar.gz
+    SOURCE_DIR "${CMAKE_BINARY_DIR}/rapidjson" CONFIGURE_COMMAND "" BUILD_COMMAND "" INSTALL_COMMAND "" TEST_COMMAND "")
   set(RAPIDJSON_INCLUDE_DIR "${CMAKE_BINARY_DIR}/rapidjson/include")
 endif()
-
 include_directories(${BOOST_INCLUDE_DIR})
 include_directories(${RAPIDJSON_INCLUDE_DIR})
 
-# Define CCAPI macros
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_ASCENDEX)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BINANCE)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BINANCE_COIN_FUTURES)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BINANCE_US)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BINANCE_USDS_FUTURES)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BITFINEX)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BITGET)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BITGET_FUTURES)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BITMART)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BITMEX)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BITSTAMP)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_BYBIT)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_COINBASE)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_CRYPTOCOM)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_DERIBIT)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_ERISX)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_GATEIO)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_GATEIO_PERPETUAL_FUTURES)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_GEMINI)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_HUOBI)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_HUOBI_COIN_SWAP)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_HUOBI_USDT_SWAP)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_KRAKEN)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_KRAKEN_FUTURES)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_KUCOIN)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_KUCOIN_FUTURES)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_MEXC)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_MEXC_FUTURES)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_OKX)
-add_definitions(-DCCAPI_ENABLE_EXCHANGE_WHITEBIT)
-
 # Library Sources
+file(GLOB EXCHANGE_SOURCES "src/exchanges/*.cpp")
+file(GLOB SESSION_SOURCES "src/sessions/*.cpp")
 set(SOURCES
     src/client.cpp
-    src/exchanges/ascendex.cpp
-    src/exchanges/binance.cpp
-    src/exchanges/binance-coin-futures.cpp
-    src/exchanges/binance-us.cpp
-    src/exchanges/binance-usds-futures.cpp
-    src/exchanges/bitfinex.cpp
-    src/exchanges/bitget.cpp
-    src/exchanges/bitget-futures.cpp
-    src/exchanges/bitmart.cpp
-    src/exchanges/bitmex.cpp
-    src/exchanges/bitstamp.cpp
-    src/exchanges/bybit.cpp
-    src/exchanges/coinbase.cpp
-    src/exchanges/cryptocom.cpp
-    src/exchanges/deribit.cpp
-    src/exchanges/erisx.cpp
-    src/exchanges/gateio.cpp
-    src/exchanges/gateio-perpetual-futures.cpp
-    src/exchanges/gemini.cpp
-    src/exchanges/huobi.cpp
-    src/exchanges/huobi-coin-swap.cpp
-    src/exchanges/huobi-usdt-swap.cpp
-    src/exchanges/kraken.cpp
-    src/exchanges/kraken-futures.cpp
-    src/exchanges/kucoin.cpp
-    src/exchanges/kucoin-futures.cpp
-    src/exchanges/mexc.cpp
-    src/exchanges/mexc-futures.cpp
-    src/exchanges/okx.cpp
-    src/exchanges/whitebit.cpp
+    ${EXCHANGE_SOURCES}
+    ${SESSION_SOURCES}
 )
 
 add_library(nccapi ${SOURCES})
@@ -119,6 +43,38 @@ endif()
 if (TARGET rapidjson)
     add_dependencies(nccapi rapidjson)
 endif()
+
+# Apply exchange-specific definitions to the specific SESSION source file ONLY
+set_property(SOURCE src/sessions/kucoin-futures_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_KUCOIN_FUTURES)
+set_property(SOURCE src/sessions/gateio_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_GATEIO)
+set_property(SOURCE src/sessions/bitmart_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BITMART)
+set_property(SOURCE src/sessions/binance-coin-futures_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BINANCE_COIN_FUTURES)
+set_property(SOURCE src/sessions/huobi-usdt-swap_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_HUOBI_USDT_SWAP)
+set_property(SOURCE src/sessions/erisx_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_ERISX)
+set_property(SOURCE src/sessions/ascendex_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_ASCENDEX)
+set_property(SOURCE src/sessions/bitmex_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BITMEX)
+set_property(SOURCE src/sessions/huobi-coin-swap_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_HUOBI_COIN_SWAP)
+set_property(SOURCE src/sessions/bitfinex_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BITFINEX)
+set_property(SOURCE src/sessions/binance-us_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BINANCE_US)
+set_property(SOURCE src/sessions/kraken-futures_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_KRAKEN_FUTURES)
+set_property(SOURCE src/sessions/coinbase_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_COINBASE)
+set_property(SOURCE src/sessions/mexc_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_MEXC)
+set_property(SOURCE src/sessions/whitebit_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_WHITEBIT)
+set_property(SOURCE src/sessions/mexc-futures_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_MEXC_FUTURES)
+set_property(SOURCE src/sessions/kucoin_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_KUCOIN)
+set_property(SOURCE src/sessions/bitget-futures_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BITGET_FUTURES)
+set_property(SOURCE src/sessions/huobi_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_HUOBI)
+set_property(SOURCE src/sessions/deribit_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_DERIBIT)
+set_property(SOURCE src/sessions/gateio-perpetual-futures_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_GATEIO_PERPETUAL_FUTURES)
+set_property(SOURCE src/sessions/kraken_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_KRAKEN)
+set_property(SOURCE src/sessions/bybit_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BYBIT)
+set_property(SOURCE src/sessions/okx_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_OKX)
+set_property(SOURCE src/sessions/gemini_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_GEMINI)
+set_property(SOURCE src/sessions/bitstamp_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BITSTAMP)
+set_property(SOURCE src/sessions/cryptocom_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_CRYPTOCOM)
+set_property(SOURCE src/sessions/binance_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BINANCE)
+set_property(SOURCE src/sessions/binance-usds-futures_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BINANCE_USDS_FUTURES)
+set_property(SOURCE src/sessions/bitget_session.cpp PROPERTY COMPILE_DEFINITIONS CCAPI_ENABLE_EXCHANGE_BITGET)
 
 # Test Executable
 add_executable(test_structure tests/test_structure.cpp)

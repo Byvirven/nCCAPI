@@ -5,10 +5,10 @@
 #include <vector>
 #include <string>
 
-// CCAPI includes
-#define CCAPI_ENABLE_SERVICE_MARKET_DATA
-#define CCAPI_ENABLE_EXCHANGE_OKX
-#include "ccapi_cpp/ccapi_session.h"
+#include "nccapi/sessions/okx_session.hpp"
+#include "ccapi_cpp/ccapi_request.h"
+#include "ccapi_cpp/ccapi_event.h"
+#include "ccapi_cpp/ccapi_message.h"
 
 namespace nccapi {
 
@@ -17,7 +17,7 @@ public:
     Impl() {
         ccapi::SessionOptions options;
         ccapi::SessionConfigs configs;
-        session = std::make_unique<ccapi::Session>(options, configs);
+        session = std::make_unique<OkxSession>(options, configs);
     }
 
     std::vector<Instrument> get_instruments() {
@@ -35,7 +35,7 @@ public:
     }
 
 private:
-    std::unique_ptr<ccapi::Session> session;
+    std::unique_ptr<OkxSession> session;
 
     std::vector<Instrument> fetch_instruments_by_type(const std::string& instType) {
         std::vector<Instrument> instruments;
