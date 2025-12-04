@@ -27,8 +27,10 @@ public:
 
         // Use GENERIC_PUBLIC_REQUEST to avoid CCAPI adding ?showPermissionSets=false (Error -1104)
         ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "binance-us", "", "GET_INSTRUMENTS");
-        request.appendParam(std::string(CCAPI_HTTP_PATH), "/api/v3/exchangeInfo");
-        request.appendParam(std::string(CCAPI_HTTP_METHOD), "GET");
+        request.appendParam({
+            {CCAPI_HTTP_PATH, "/api/v3/exchangeInfo"},
+            {CCAPI_HTTP_METHOD, "GET"}
+        });
 
         session->sendRequest(request);
 

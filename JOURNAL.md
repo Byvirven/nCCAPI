@@ -22,16 +22,16 @@
     - Automatisation de la migration via un script Python.
 
 ## 5. Résolution du Problème Binance US
-- **Problème** : L'implémentation standard de CCAPI pour `GET_INSTRUMENTS` sur Binance US échouait avec une erreur `-1104` ("Not all sent parameters were read"). Cela était dû à l'ajout automatique du paramètre `showPermissionSets=false` par CCAPI, que l'API Binance US (contrairement à Binance Global) ne semble pas supporter ou traiter correctement dans ce contexte.
-- **Diagnostic** :
-    - Utilisation d'un test isolé (`test_binance_us_iso`) pour reproduire l'erreur.
-    - Confirmation que l'erreur provenait de l'appel REST standard.
-    - Identification d'une dépendance manquante : `CCAPI_ENABLE_EXCHANGE_BINANCE` était requise en plus de `CCAPI_ENABLE_EXCHANGE_BINANCE_US` pour compiler correctement la session (car `BinanceUs` hérite de `BinanceBase`).
-- **Solution** :
-    1.  **Architecture Session** : Ajout de `CCAPI_ENABLE_EXCHANGE_BINANCE` dans les définitions de compilation de `src/sessions/binance-us_session.cpp` via `CMakeLists.txt`.
-    2.  **Logique Request** : Remplacement de l'opération standard `GET_INSTRUMENTS` par une requête manuelle `GENERIC_PUBLIC_REQUEST` ciblant `/api/v3/exchangeInfo`.
-    3.  **Parsing** : Parsing manuel de la réponse JSON avec RapidJSON pour extraire la liste des symboles.
-- **Résultat** : La méthode `get_instruments()` pour Binance US fonctionne désormais correctement et retourne la liste des paires (612 instruments trouvés lors du test).
+- **Problème** : L'implémentation standard de CCAPI pour `GET_INSTRUMENTS` sur Binance US échouait avec une erreur `-1104` et crashait lors de la destruction de l'objet.
+- **Diagnostic & Correctifs** :
+    1.  **Erreur API (-1104)** : Utilisation d'une `GENERIC_PUBLIC_REQUEST` manuelle vers `/api/v3/exchangeInfo` pour éviter les paramètres par défaut de CCAPI incompatibles.
+    2.  **Dépendance de Compilation** : Activation de `CCAPI_ENABLE_EXCHANGE_BINANCE` (Base) en plus de `_BINANCE_US` dans la session pour satisfaire les dépendances internes de CCAPI.
+    3.  **Crash à la fermeture** : Ajout de `session->stop()` explicite dans le destructeur de `BinanceUsSession` avant le `delete` pour assurer un nettoyage propre des threads `boost::asio`.
+- **Validation** : Test isolé réussi (612 instruments récupérés).
+- **Performance** :
+    - Compilation logique (`binance-us.cpp`) : **~14s** (vs ~3m pour le test complet initial).
+    - Compilation session (`binance-us_session.cpp`) : **~3m** (plus lourd que la moyenne car double instanciation Base+US, mais ne se fait qu'une fois).
+    - Comparatif : `binance.cpp` logique ~4s, session ~1m17s. L'overhead pour US est acceptable vu la complexité résolue.
 
 ## Prochaines Étapes
 - Investiguer et corriger l'implémentation de `Bybit`.

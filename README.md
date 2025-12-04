@@ -22,7 +22,7 @@ We are currently in a major refactoring phase to normalize the API.
 *   Global `get_instruments()` (Fetch Pairs) implementation for supported exchanges.
 *   Factory pattern via `nccapi::Client`.
 *   **Build Optimization**: Full split of Logic vs. CCAPI Session.
-*   **Binance US**: Fixed `get_instruments` by using manual Generic Requests to bypass API limitations.
+*   **Binance US**: Fixed `get_instruments` by using manual Generic Requests to bypass API limitations. Verified functional (612 instruments).
 
 **Known Issues:**
 *   **Binance (Global)**: Fully functional logic, but often geo-blocked in cloud/CI environments.

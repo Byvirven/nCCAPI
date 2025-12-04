@@ -12,7 +12,11 @@ BinanceUsSession::BinanceUsSession(const ccapi::SessionOptions& options, const c
 }
 
 BinanceUsSession::~BinanceUsSession() {
-    delete session;
+    // Ensure the session is stopped before deletion to clean up threads/contexts
+    if (session) {
+        session->stop();
+        delete session;
+    }
 }
 
 void BinanceUsSession::sendRequest(ccapi::Request& request) {
