@@ -1,119 +1,135 @@
-# Unified CCAPI Wrapper
+# nCCAPI - Normalized Crypto-Chassis API Wrapper
 
-Un wrapper C++ header-only normalisé pour la bibliothèque [Crypto-Chassis CCAPI](https://github.com/crypto-chassis/ccapi), conçu pour offrir une expérience développeur similaire à CCXT (interface unique, simple et unifiée) tout en conservant la performance du C++.
+A standardized, header-only C++ wrapper for the [Crypto-Chassis CCAPI](https://github.com/crypto-chassis/ccapi) library. nCCAPI provides a unified interface similar to CCXT, allowing developers to interact with multiple cryptocurrency exchanges using a single, consistent API.
 
-## Fonctionnalités
+## Features
 
-Ce wrapper normalise les appels API REST publics et privés pour une multitude d'exchanges. Il gère en interne les spécificités ("quirks") de chaque plateforme (ex: format des tickers, structure du carnet d'ordres) pour exposer des structures de données C++ standards.
+*   **Unified Interface**: Access multiple exchanges (Binance, Coinbase, Kraken, OKX, etc.) through a single `nccapi::Client`.
+*   **Simplified Data Structures**: Standardized `Instrument` struct for trading pairs.
+*   **Header-Only Wrapper**: Easy integration (though dependencies must be linked).
+*   **Pimpl Idiom**: Hides heavy CCAPI compilation dependencies from your main application code.
 
-### Méthodes Supportées
+## Current Status (Refactoring Phase)
 
-Toutes les méthodes sont synchrones et bloquantes (via polling interne) pour une simplicité d'utilisation maximale.
+We are currently in a major refactoring phase to normalize the API.
+**Completed:**
+*   Global `get_instruments()` (Fetch Pairs) implementation for supported exchanges.
+*   Factory pattern via `nccapi::Client`.
 
-*   **Public REST**:
-    *   `Ticker fetchTicker(symbol)` : Prix, Bid, Ask, Volume.
-    *   `OrderBook fetchOrderBook(symbol, limit)` : Carnet d'ordres normalisé (bids/asks).
-    *   `vector<Trade> fetchTrades(symbol, limit)` : Derniers trades.
-    *   `vector<OHLCV> fetchOHLCV(symbol, timeframe)` : Bougies (Candlesticks).
-    *   `vector<Instrument> fetchInstruments()` : Liste des paires disponibles.
+**Known Issues:**
+*   **Binance (Global)**: Fully functional logic, but often geo-blocked in cloud/CI environments.
+*   **Bybit**: Currently non-functional.
+*   **Binance.US**: Currently non-functional.
 
-*   **WebSocket**:
-    *   `subscribeTicker(symbol)`
-    *   `subscribeOrderBook(symbol, depth)`
-    *   `subscribeTrades(symbol)`
-    *   `subscribeOHLCV(symbol, interval)`
-    *   Callbacks configurables via `setOnTicker`, `setOnOrderBook`, etc.
+## Supported Exchanges
 
-*   **Privé** (Nécessite API Key) :
-    *   `string createOrder(symbol, side, amount, price)` : Création d'ordre (Limit ou Market).
-    *   `map<string, double> fetchBalance()` : Solde des comptes.
+The following exchanges have the `get_instruments()` method implemented:
 
-## Exchanges Supportés & Testés
+*   AscendEX
+*   Binance (Global) *
+*   Binance Coin Futures *
+*   Binance US *
+*   Binance USDS Futures *
+*   Bitfinex
+*   Bitget
+*   Bitget Futures
+*   Bitmart
+*   BitMEX
+*   Bitstamp
+*   Bybit *
+*   Coinbase
+*   Crypto.com
+*   Deribit
+*   ErisX
+*   Gate.io
+*   Gate.io Perpetual Futures
+*   Gemini
+*   Huobi
+*   Huobi Coin Swap
+*   Huobi USDT Swap
+*   Kraken
+*   Kraken Futures
+*   KuCoin
+*   KuCoin Futures
+*   MEXC
+*   MEXC Futures
+*   OKX
+*   WhiteBIT
 
-| Exchange | Ticker | OrderBook | Trades | Remarques |
-|----------|--------|-----------|--------|-----------|
-| **Binance US** | ✅ | ✅ | ✅ | Via Generic Fallback |
-| **Coinbase** | ✅ | ✅ | ✅ | Via Generic Fallback |
-| **Kraken** | ✅ | ✅ | ✅ | |
-| **Kucoin** | ✅ | ✅ | ✅ | |
-| **Huobi** | ✅ | ✅ | ✅ | |
-| **Bitstamp** | ✅ | ✅ | ✅ | |
-| **Gemini** | ✅ | ✅ | ✅ | |
-| **OKX** | ✅ | ✅ | ✅ | |
-| **Mexc** | ✅ | ✅ | ✅ | |
-| **Bitfinex** | ✅ | ✅ | ✅ | |
-| **AscendEx** | ✅ | ✅ | ✅ | |
-| **Gate.io** | ✅ | ⚠️ | ✅ | Book vide parfois |
-| **Bitget** | ✅ | ❌ | ✅ | |
+*See "Known Issues" above for exchanges marked with (*).*
 
-*(Note: Binance Global et Bitmex sont supportés par le code mais souvent bloqués par IP dans les environnements cloud/sandbox)*.
+## Dependencies & Installation
 
-## Dépendances & Installation
-
-Ce projet utilise [CCAPI](https://github.com/crypto-chassis/ccapi) comme sous-module (ou structure de répertoire équivalente).
-
-**Important :** Vous devez cloner ce dépôt avec l'option `--recursive` pour récupérer les dépendances (notamment CCAPI).
+This project uses `git` submodules. You **must** clone recursively.
 
 ```bash
-git clone --recursive <URL_DU_REPO>
-# Ou si vous avez déjà cloné :
+git clone --recursive <REPO_URL>
+```
+
+If you already cloned without recursive:
+```bash
 git submodule update --init --recursive
 ```
 
-### Dépendances Externes
-*   **OpenSSL** : Doit être installé sur votre système (ex: `sudo apt install libssl-dev`).
-*   **Boost & RapidJSON** : Inclus dans `external/include` ou téléchargés automatiquement si configuré.
+### System Requirements
+*   **C++17** compiler.
+*   **OpenSSL** (System installed, e.g., `libssl-dev` on Debian/Ubuntu).
+*   **Boost** (System installed or via `external/`).
+*   **RapidJSON** (Included in `external/`).
 
 ## Compilation
 
+**CRITICAL WARNING:**
+Do **NOT** use parallel compilation (`make -j` or `make -j4`). The CCAPI library heavily utilizes C++ templates, which requires significant RAM during compilation. Using parallel jobs will saturate your memory and crash the environment.
+
+**Always compile sequentially:**
+
 ```bash
-mkdir build && cd build
+mkdir build
+cd build
 cmake ..
 make
 ```
 
-## Exemple d'Utilisation
+*Note: Compilation may take significant time (up to 1 hour on limited hardware) due to the heavy template instantiation of the underlying CCAPI library.*
+
+## Usage Example
 
 ```cpp
-#include "src/UnifiedExchange.hpp"
+#include "nccapi/client.hpp"
 #include <iostream>
 
-using namespace unified_crypto;
-
 int main() {
-    // 1. Initialisation (Public)
-    UnifiedExchange exchange("coinbase");
-
-    // 2. Récupération du Ticker
     try {
-        Ticker t = exchange.fetchTicker("BTC-USD");
-        std::cout << "BTC/USD: " << t.lastPrice << " (Bid: " << t.bidPrice << ")" << std::endl;
+        // 1. Instantiate the Client (Factory)
+        nccapi::Client client;
+
+        // 2. Select an exchange
+        std::string exchange_name = "coinbase";
+
+        // 3. Fetch Instruments (Pairs)
+        std::cout << "Fetching instruments for " << exchange_name << "..." << std::endl;
+        auto instruments = client.get_pairs(exchange_name);
+
+        // 4. Display results
+        std::cout << "Found " << instruments.size() << " instruments." << std::endl;
+        for (const auto& inst : instruments) {
+            std::cout << "- " << inst.symbol << " (Base: " << inst.base_asset
+                      << ", Quote: " << inst.quote_asset << ")" << std::endl;
+        }
+
     } catch (const std::exception& e) {
-        std::cerr << "Erreur: " << e.what() << std::endl;
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
     }
-
-    // 3. Initialisation (Privé)
-    ExchangeConfig config;
-    config.apiKey = "VOTRE_KEY";
-    config.apiSecret = "VOTRE_SECRET";
-    // config.passphrase = "VOTRE_PASSPHRASE"; // Si requis (ex: Kucoin, Coinbase Pro)
-
-    UnifiedExchange privateExchange("binance-us", config);
-
-    // 4. Création d'un ordre
-    // privateExchange.createOrder("BTCUSDT", "BUY", 0.001); // Market Order
 
     return 0;
 }
 ```
 
-## Structure du Code
+## Architecture
 
-*   `src/UnifiedExchange.hpp` : **Le Coeur du projet**. Contient toute la logique, les classes, et la gestion des cas particuliers (Generic Requests).
-*   `src/main.cpp` : Harnais de test basique REST.
-*   `src/test_global.cpp` : Scénario de test complet (REST + WS + Rapport) pour validation finale.
-
-## Architecture "Generic Request"
-
-Certains exchanges (comme Coinbase ou Binance US sur certains endpoints) ne répondent pas correctement aux macros standards de CCAPI (`GET_BBOS`, etc.) dans certaines versions ou configurations.
-Pour garantir la fiabilité, ce wrapper implémente un système de fallback : si l'exchange est connu pour être "difficile", le wrapper construit manuellement une requête HTTP (`GENERIC_PUBLIC_REQUEST`) et parse le JSON brut avec RapidJSON, contournant ainsi les limitations de l'abstraction par défaut.
+*   **`nccapi::Client`**: The entry point. Manages exchange instances.
+*   **`nccapi::Exchange`**: The abstract base class defining the interface.
+*   **`nccapi::Instrument`**: A unified structure representing a trading pair (Symbol, Base, Quote, etc.).
+*   **`src/exchanges/*.cpp`**: Implementation files hiding the CCAPI logic using the Pimpl (Pointer to Implementation) idiom to keep headers clean.
