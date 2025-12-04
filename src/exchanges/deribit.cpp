@@ -22,13 +22,10 @@ public:
         std::vector<Instrument> instruments;
         ccapi::Request request(ccapi::Request::Operation::GET_INSTRUMENTS, "deribit");
 
-        // Specific fix for OKX if needed, or generic request
-        // For now, standard request
-
         session->sendRequest(request);
 
         auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(10)) {
+        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
             std::vector<ccapi::Event> events = session->getEventQueue().purge();
             for (const auto& event : events) {
                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
@@ -37,19 +34,38 @@ public:
                             for (const auto& element : message.getElementList()) {
                                 Instrument instrument;
                                 instrument.id = element.getValue(CCAPI_INSTRUMENT);
+                                // Deribit uses underlying symbol as base for options/futures often
                                 instrument.base = element.getValue(CCAPI_BASE_ASSET);
                                 instrument.quote = element.getValue(CCAPI_QUOTE_ASSET);
 
                                 std::string price_inc = element.getValue(CCAPI_ORDER_PRICE_INCREMENT);
-                                if (!price_inc.empty()) instrument.tick_size = std::stod(price_inc);
+                                if (!price_inc.empty()) { try { instrument.tick_size = std::stod(price_inc); } catch(...) {} }
 
                                 std::string qty_inc = element.getValue(CCAPI_ORDER_QUANTITY_INCREMENT);
-                                if (!qty_inc.empty()) instrument.step_size = std::stod(qty_inc);
+                                if (!qty_inc.empty()) { try { instrument.step_size = std::stod(qty_inc); } catch(...) {} }
 
-                                if (!instrument.base.empty() && !instrument.quote.empty()) {
-                                    instrument.symbol = instrument.base + "/" + instrument.quote;
+                                std::string min_qty = element.getValue(CCAPI_ORDER_QUANTITY_MIN);
+                                if (!min_qty.empty()) { try { instrument.min_size = std::stod(min_qty); } catch(...) {} }
+
+                                if (element.has(CCAPI_UNDERLYING_SYMBOL)) {
+                                    instrument.underlying = element.getValue(CCAPI_UNDERLYING_SYMBOL);
+                                    if(instrument.base.empty()) instrument.base = instrument.underlying;
+                                }
+                                if (element.has(CCAPI_SETTLE_ASSET)) instrument.settle_asset = element.getValue(CCAPI_SETTLE_ASSET);
+                                if (element.has(CCAPI_CONTRACT_SIZE)) {
+                                     std::string val = element.getValue(CCAPI_CONTRACT_SIZE);
+                                     if(!val.empty()) { try { instrument.contract_size = std::stod(val); } catch(...) {} }
+                                }
+
+                                instrument.symbol = instrument.id; // Use ID as symbol for derivatives usually
+
+                                // Determine type
+                                if (instrument.id.find("-C") != std::string::npos || instrument.id.find("-P") != std::string::npos) {
+                                    instrument.type = "option";
+                                } else if (instrument.id.find("-PERPETUAL") != std::string::npos) {
+                                    instrument.type = "swap";
                                 } else {
-                                    instrument.symbol = instrument.id; // Fallback
+                                    instrument.type = "future";
                                 }
 
                                 for (const auto& pair : element.getNameValueMap()) {
@@ -60,8 +76,6 @@ public:
                             }
                             return instruments;
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                            // Log error but don't crash, return empty or what we have
-                            // std::cerr << "Deribit Error: " << message.getElementList()[0].getValue(CCAPI_ERROR_MESSAGE) << std::endl;
                             return instruments;
                         }
                     }
@@ -69,8 +83,6 @@ public:
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
-
-        // Timeout
         return instruments;
     }
 

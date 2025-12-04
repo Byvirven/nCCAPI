@@ -22,13 +22,10 @@ public:
         std::vector<Instrument> instruments;
         ccapi::Request request(ccapi::Request::Operation::GET_INSTRUMENTS, "binance-us");
 
-        // Specific fix for OKX if needed, or generic request
-        // For now, standard request
-
         session->sendRequest(request);
 
         auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(10)) {
+        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
             std::vector<ccapi::Event> events = session->getEventQueue().purge();
             for (const auto& event : events) {
                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
@@ -41,15 +38,28 @@ public:
                                 instrument.quote = element.getValue(CCAPI_QUOTE_ASSET);
 
                                 std::string price_inc = element.getValue(CCAPI_ORDER_PRICE_INCREMENT);
-                                if (!price_inc.empty()) instrument.tick_size = std::stod(price_inc);
+                                if (!price_inc.empty()) { try { instrument.tick_size = std::stod(price_inc); } catch(...) {} }
 
                                 std::string qty_inc = element.getValue(CCAPI_ORDER_QUANTITY_INCREMENT);
-                                if (!qty_inc.empty()) instrument.step_size = std::stod(qty_inc);
+                                if (!qty_inc.empty()) { try { instrument.step_size = std::stod(qty_inc); } catch(...) {} }
+
+                                std::string qty_min = element.getValue(CCAPI_ORDER_QUANTITY_MIN);
+                                if (!qty_min.empty()) { try { instrument.min_size = std::stod(qty_min); } catch(...) {} }
+
+                                if (element.has(CCAPI_ORDER_QUOTE_QUANTITY_MIN)) {
+                                    std::string val = element.getValue(CCAPI_ORDER_QUOTE_QUANTITY_MIN);
+                                    if(!val.empty()) { try { instrument.min_notional = std::stod(val); } catch(...) {} }
+                                }
 
                                 if (!instrument.base.empty() && !instrument.quote.empty()) {
                                     instrument.symbol = instrument.base + "/" + instrument.quote;
                                 } else {
-                                    instrument.symbol = instrument.id; // Fallback
+                                    instrument.symbol = instrument.id;
+                                }
+                                instrument.type = "spot";
+
+                                if (element.has(CCAPI_INSTRUMENT_STATUS)) {
+                                    instrument.active = (element.getValue(CCAPI_INSTRUMENT_STATUS) == "TRADING");
                                 }
 
                                 for (const auto& pair : element.getNameValueMap()) {
@@ -60,17 +70,14 @@ public:
                             }
                             return instruments;
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                            // Log error but don't crash, return empty or what we have
-                            // std::cerr << "BinanceUs Error: " << message.getElementList()[0].getValue(CCAPI_ERROR_MESSAGE) << std::endl;
-                            return instruments;
+                             // Log error if needed
+                             return instruments;
                         }
                     }
                 }
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
-
-        // Timeout
         return instruments;
     }
 
