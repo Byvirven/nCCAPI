@@ -46,6 +46,6 @@ if (TARGET rapidjson)
     add_dependencies(nccapi rapidjson)
 endif()
 
-# Test Executables
+# Test Executable
 add_executable(test_structure tests/test_structure.cpp)
 target_link_libraries(test_structure nccapi OpenSSL::SSL OpenSSL::Crypto Threads::Threads ZLIB::ZLIB dl)

@@ -47,16 +47,13 @@ public:
                                             if (s.HasMember("symbol")) instrument.id = s["symbol"].GetString();
                                             else continue;
 
-                                            // Basic parsing
-                                            if (s.HasMember("underlying")) instrument.base = s["underlying"].GetString(); // Simplified
-                                            instrument.quote = "USD"; // Mostly USD?
-                                            // Kraken futures symbols are complex (e.g., pi_xbtusd).
-                                            // Attempt to parse symbol for base/quote if underlying is simple
+                                            if (s.HasMember("underlying")) instrument.base = s["underlying"].GetString();
+                                            instrument.quote = "USD";
 
                                             if (s.HasMember("tickSize")) instrument.tick_size = s["tickSize"].GetDouble();
                                             if (s.HasMember("contractSize")) instrument.contract_multiplier = s["contractSize"].GetDouble();
+                                            if (s.HasMember("contractValueTrade")) instrument.contract_size = s["contractValueTrade"].GetDouble();
 
-                                            // Symbol formatting
                                             instrument.symbol = instrument.id;
 
                                             if (s.HasMember("tradeable")) {
@@ -65,6 +62,17 @@ public:
 
                                             instrument.type = "future";
                                             if (s.HasMember("type")) instrument.type = s["type"].GetString();
+
+                                            // Populate Info
+                                            for (auto& m : s.GetObject()) {
+                                                if (m.value.IsString()) {
+                                                    instrument.info[m.name.GetString()] = m.value.GetString();
+                                                } else if (m.value.IsNumber()) {
+                                                    instrument.info[m.name.GetString()] = std::to_string(m.value.GetDouble());
+                                                } else if (m.value.IsBool()) {
+                                                    instrument.info[m.name.GetString()] = m.value.GetBool() ? "true" : "false";
+                                                }
+                                            }
 
                                             instruments.push_back(instrument);
                                         }

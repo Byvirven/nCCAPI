@@ -41,6 +41,11 @@ public:
                                     instrument.base = element.getValue(CCAPI_BASE_ASSET);
                                     instrument.quote = element.getValue(CCAPI_QUOTE_ASSET);
 
+                                    // Settle is often implied by productType or quote
+                                    if (productType == "USDT-FUTURES") instrument.settle = "USDT";
+                                    else if (productType == "USDC-FUTURES") instrument.settle = "USDC";
+                                    else if (productType == "COIN-FUTURES") instrument.settle = instrument.base;
+
                                     std::string price_inc = element.getValue(CCAPI_ORDER_PRICE_INCREMENT);
                                     if (!price_inc.empty()) { try { instrument.tick_size = std::stod(price_inc); } catch(...) {} }
 
@@ -55,10 +60,8 @@ public:
                                     } else {
                                         instrument.symbol = instrument.id;
                                     }
-                                    instrument.type = "future"; // Simplified
-
-                                    // Status check if available?
-                                    instrument.active = true; // Assume active if returned
+                                    instrument.type = "future";
+                                    instrument.active = true;
 
                                     for (const auto& pair : element.getNameValueMap()) {
                                         instrument.info[std::string(pair.first)] = pair.second;

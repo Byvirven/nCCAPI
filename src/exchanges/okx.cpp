@@ -92,7 +92,8 @@ private:
                                     if(!val.empty()) { try { instrument.contract_multiplier = std::stod(val); } catch(...) {} }
                                 }
                                 if (element.has(CCAPI_UNDERLYING_SYMBOL)) instrument.underlying = element.getValue(CCAPI_UNDERLYING_SYMBOL);
-                                if (element.has(CCAPI_SETTLE_ASSET)) instrument.settle_asset = element.getValue(CCAPI_SETTLE_ASSET);
+                                // Corrected field name
+                                if (element.has(CCAPI_SETTLE_ASSET)) instrument.settle = element.getValue(CCAPI_SETTLE_ASSET);
 
                                 // Store raw info
                                 for (const auto& pair : element.getNameValueMap()) {

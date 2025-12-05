@@ -47,7 +47,9 @@ public:
                                     instrument.underlying = element.getValue(CCAPI_UNDERLYING_SYMBOL);
                                     if(instrument.base.empty()) instrument.base = instrument.underlying;
                                 }
-                                if (element.has(CCAPI_SETTLE_ASSET)) instrument.settle_asset = element.getValue(CCAPI_SETTLE_ASSET);
+                                // Corrected field name
+                                if (element.has(CCAPI_SETTLE_ASSET)) instrument.settle = element.getValue(CCAPI_SETTLE_ASSET);
+
                                 if (element.has(CCAPI_CONTRACT_SIZE)) {
                                      std::string val = element.getValue(CCAPI_CONTRACT_SIZE);
                                      if(!val.empty()) { try { instrument.contract_size = std::stod(val); } catch(...) {} }
@@ -63,6 +65,8 @@ public:
                                 } else {
                                     instrument.type = "future";
                                 }
+
+                                instrument.active = true; // Assume active if returned
 
                                 for (const auto& pair : element.getNameValueMap()) {
                                     instrument.info[std::string(pair.first)] = pair.second;

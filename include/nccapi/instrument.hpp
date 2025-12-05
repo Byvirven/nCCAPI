@@ -3,47 +3,54 @@
 
 #include <string>
 #include <map>
-#include <vector>
-#include <iostream>
-#include <optional>
+#include <sstream>
 
 namespace nccapi {
 
 /**
- * @brief Unified Instrument structure compatible with all CCAPI supported exchanges.
- * Supports Spot, Futures, Options, and Swaps.
+ * @brief Represents a trading instrument (pair/contract).
  */
 struct Instrument {
-    // Identity
-    std::string id;             // Exchange-specific ID (e.g., "BTC-USD", "XXBTZUSD", "BTC-25SEP20")
-    std::string symbol;         // Normalized symbol (e.g., "BTC/USD")
+    std::string id;             // Exchange-specific ID (e.g., "BTC-USDT", "XBTUSD")
+    std::string symbol;         // Unified symbol (e.g., "BTC/USDT")
     std::string base;           // Base asset (e.g., "BTC")
-    std::string quote;          // Quote asset (e.g., "USD", "USDT")
+    std::string quote;          // Quote asset (e.g., "USDT")
+    std::string settle;         // Settlement asset (e.g., "USDT", "BTC")
 
-    // Status
-    bool active = true;         // Trading status
+    std::string type;           // spot, future, option, swap
+    bool active = false;        // Trading status
 
-    // Order Constraints
-    double min_size = 0.0;      // Minimum order quantity (e.g., 0.001 BTC)
-    double min_notional = 0.0;  // Minimum order value in quote currency (e.g., 5 USDT)
-    double tick_size = 0.0;     // Price increment (e.g., 0.01)
-    double step_size = 0.0;     // Quantity increment (e.g., 0.00001)
+    double tick_size = 0.0;     // Price increment
+    double step_size = 0.0;     // Quantity increment
+    double min_size = 0.0;      // Minimum quantity
+    double min_notional = 0.0;  // Minimum notional value (price * qty)
 
-    // Derivatives (Futures/Swaps/Options)
-    double contract_size = 1.0;          // Size of one contract (e.g., 100 USD, 1 BTC)
-    double contract_multiplier = 1.0;    // Multiplier for value calculation
-    std::string underlying;              // Underlying asset symbol (e.g., "BTC")
-    std::string settle_asset;            // Settlement asset (e.g., "USDT", "BTC")
-    std::string expire_date;             // Expiration date (ISO 8601 or exchange specific)
-    std::string type;                    // "spot", "future", "option", "swap"
+    double contract_multiplier = 1.0; // Contract size/multiplier
+    double contract_size = 0.0;       // Alternate size definition (e.g. 100 USD)
 
-    // Raw map for exchange-specific data (everything else)
-    std::map<std::string, std::string> info;
+    // Derivatives / Options
+    std::string underlying;     // Underlying asset (e.g., "BTC")
+    std::string expiry;         // Expiration timestamp (ISO 8601 or ms string)
+    double strike_price = 0.0;  // Strike price for options
+    std::string option_type;    // "call" or "put"
 
-    // Helper for debugging
+    // Fees (if available)
+    double maker_fee = 0.0;
+    double taker_fee = 0.0;
+
+    std::map<std::string, std::string> info; // Raw exchange info
+
     std::string toString() const {
-        return "Instrument(id=" + id + ", symbol=" + symbol + ", base=" + base + ", quote=" + quote +
-               ", tick=" + std::to_string(tick_size) + ", step=" + std::to_string(step_size) + ")";
+        std::stringstream ss;
+        ss << "Instrument(id=" << id
+           << ", symbol=" << symbol
+           << ", base=" << base
+           << ", quote=" << quote
+           << ", type=" << type;
+        if (tick_size > 0) ss << ", tick=" << tick_size;
+        if (step_size > 0) ss << ", step=" << step_size;
+        ss << ")";
+        return ss.str();
     }
 };
 

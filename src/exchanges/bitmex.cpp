@@ -10,6 +10,8 @@
 #include "ccapi_cpp/ccapi_macro.h"
 
 #include "rapidjson/document.h"
+#include "rapidjson/writer.h"
+#include "rapidjson/stringbuffer.h"
 
 namespace nccapi {
 
@@ -19,7 +21,6 @@ public:
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
-        // Use Generic Request to avoid CCAPI Service Crash on missing fields
         ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitmex", "", "GET_INSTRUMENTS");
         request.appendParam({
             {CCAPI_HTTP_PATH, "/api/v1/instrument/active"},
@@ -51,6 +52,7 @@ public:
                                             // Base/Quote
                                             if (s.HasMember("rootSymbol")) instrument.base = s["rootSymbol"].GetString();
                                             if (s.HasMember("quoteCurrency")) instrument.quote = s["quoteCurrency"].GetString();
+                                            if (s.HasMember("settlCurrency")) instrument.settle = s["settlCurrency"].GetString();
 
                                             // Tick/Step
                                             if (s.HasMember("tickSize")) instrument.tick_size = s["tickSize"].GetDouble();
@@ -58,6 +60,10 @@ public:
 
                                             // Multiplier
                                             if (s.HasMember("multiplier")) instrument.contract_multiplier = s["multiplier"].GetDouble();
+                                            if (s.HasMember("contractSize")) instrument.contract_size = s["contractSize"].GetDouble();
+
+                                            // Expiry
+                                            if (s.HasMember("expiry") && !s["expiry"].IsNull()) instrument.expiry = s["expiry"].GetString();
 
                                             // Symbol
                                             if (!instrument.base.empty() && !instrument.quote.empty()) {
@@ -76,9 +82,18 @@ public:
                                                 instrument.type = "future";
                                             }
 
-                                            // Active (we called /active so safe to assume, but check state)
+                                            // Active
                                             if (s.HasMember("state")) {
                                                 instrument.active = (std::string(s["state"].GetString()) == "Open");
+                                            }
+
+                                            // Populate Info
+                                            for (auto& m : s.GetObject()) {
+                                                if (m.value.IsString()) {
+                                                    instrument.info[m.name.GetString()] = m.value.GetString();
+                                                } else if (m.value.IsNumber()) {
+                                                    instrument.info[m.name.GetString()] = std::to_string(m.value.GetDouble());
+                                                }
                                             }
 
                                             instruments.push_back(instrument);

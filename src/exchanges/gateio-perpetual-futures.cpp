@@ -40,6 +40,7 @@ public:
                                     instrument.id = element.getValue(CCAPI_INSTRUMENT);
                                     instrument.base = element.getValue(CCAPI_BASE_ASSET);
                                     instrument.quote = element.getValue(CCAPI_QUOTE_ASSET);
+                                    instrument.settle = settle; // Set settle currency
 
                                     std::string price_inc = element.getValue(CCAPI_ORDER_PRICE_INCREMENT);
                                     if (!price_inc.empty()) { try { instrument.tick_size = std::stod(price_inc); } catch(...) {} }
