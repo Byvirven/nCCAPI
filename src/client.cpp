@@ -21,7 +21,7 @@
 #include "nccapi/exchanges/coinbase.hpp"
 #include "nccapi/exchanges/cryptocom.hpp"
 #include "nccapi/exchanges/deribit.hpp"
-#include "nccapi/exchanges/erisx.hpp"
+// #include "nccapi/exchanges/erisx.hpp" // Disabled
 #include "nccapi/exchanges/gateio.hpp"
 #include "nccapi/exchanges/gateio-perpetual-futures.hpp"
 #include "nccapi/exchanges/gemini.hpp"
@@ -61,7 +61,7 @@ Client::Client() {
     exchanges_["coinbase"] = std::make_shared<Coinbase>(unifiedSession);
     exchanges_["cryptocom"] = std::make_shared<Cryptocom>(unifiedSession);
     exchanges_["deribit"] = std::make_shared<Deribit>(unifiedSession);
-    exchanges_["erisx"] = std::make_shared<Erisx>(unifiedSession);
+    // exchanges_["erisx"] = std::make_shared<Erisx>(unifiedSession); // Disabled
     exchanges_["gateio"] = std::make_shared<Gateio>(unifiedSession);
     exchanges_["gateio-perpetual-futures"] = std::make_shared<GateioPerpetualFutures>(unifiedSession);
     exchanges_["gemini"] = std::make_shared<Gemini>(unifiedSession);

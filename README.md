@@ -26,10 +26,13 @@ We are currently in a major refactoring phase to normalize the API.
 *   **Binance US**: Fixed `get_instruments` by using manual Generic Requests to bypass API limitations.
 *   **Bitmex**: Fixed crash by using manual Generic Requests and safe JSON parsing.
 *   **Bitget Futures**: Fixed empty instrument list by iterating over required product types.
+*   **Kraken Futures**: Fixed crash by using manual Generic Requests and safe JSON parsing.
+*   **GateIO Perpetual Futures**: Fixed empty instrument list by iterating over settlement currencies.
+*   **Bybit**: Updated to V5 API (iterating categories), but functionality not verifiable in geo-blocked environment.
 
 **Known Issues:**
 *   **Binance (Global)**: Fully functional logic, but often geo-blocked in cloud/CI environments.
-*   **Bybit**: Currently non-functional.
+*   **ErisX**: Removed/Disabled as the exchange migrated to Cboe Digital.
 
 ## Dependencies & Installation
 
