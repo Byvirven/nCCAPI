@@ -7,6 +7,9 @@
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
+#include "ccapi_cpp/ccapi_macro.h"
+
+#include "rapidjson/document.h"
 
 namespace nccapi {
 
@@ -16,48 +19,60 @@ public:
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
-        ccapi::Request request(ccapi::Request::Operation::GET_INSTRUMENTS, "erisx");
-
-        // Specific fix for OKX if needed, or generic request
-        // For now, standard request
+        // ErisX (now Cboe Digital) might need manual request
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "erisx", "", "GET_INSTRUMENTS");
+        // Try alternate endpoint
+        request.appendParam({
+            {CCAPI_HTTP_PATH, "/api/v3/products"},
+            {CCAPI_HTTP_METHOD, "GET"}
+        });
 
         session->sendRequest(request);
 
         auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(10)) {
+        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
             std::vector<ccapi::Event> events = session->getEventQueue().purge();
             for (const auto& event : events) {
                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
                     for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GET_INSTRUMENTS) {
+                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
                             for (const auto& element : message.getElementList()) {
-                                Instrument instrument;
-                                instrument.id = element.getValue(CCAPI_INSTRUMENT);
-                                instrument.base = element.getValue(CCAPI_BASE_ASSET);
-                                instrument.quote = element.getValue(CCAPI_QUOTE_ASSET);
+                                if (element.has(CCAPI_HTTP_BODY)) {
+                                    std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                    rapidjson::Document doc;
+                                    doc.Parse(json_str.c_str());
 
-                                std::string price_inc = element.getValue(CCAPI_ORDER_PRICE_INCREMENT);
-                                if (!price_inc.empty()) instrument.tick_size = std::stod(price_inc);
+                                    if (!doc.HasParseError() && doc.IsArray()) {
+                                        for (const auto& s : doc.GetArray()) {
+                                            Instrument instrument;
 
-                                std::string qty_inc = element.getValue(CCAPI_ORDER_QUANTITY_INCREMENT);
-                                if (!qty_inc.empty()) instrument.step_size = std::stod(qty_inc);
+                                            if (s.HasMember("symbol")) instrument.id = s["symbol"].GetString();
+                                            else if (s.HasMember("id")) instrument.id = s["id"].GetString();
+                                            else continue;
 
-                                if (!instrument.base.empty() && !instrument.quote.empty()) {
-                                    instrument.symbol = instrument.base + "/" + instrument.quote;
-                                } else {
-                                    instrument.symbol = instrument.id; // Fallback
+                                            // Basic parsing
+                                            if (s.HasMember("baseCurrency")) instrument.base = s["baseCurrency"].GetString();
+                                            if (s.HasMember("quoteCurrency")) instrument.quote = s["quoteCurrency"].GetString();
+
+                                            // Symbol formatting
+                                            if (!instrument.base.empty() && !instrument.quote.empty()) {
+                                                instrument.symbol = instrument.base + "/" + instrument.quote;
+                                            } else {
+                                                instrument.symbol = instrument.id;
+                                            }
+
+                                            if (s.HasMember("status")) {
+                                                instrument.active = (std::string(s["status"].GetString()) == "OPEN");
+                                            }
+                                            instrument.type = "spot"; // Default or parse type
+
+                                            instruments.push_back(instrument);
+                                        }
+                                        return instruments;
+                                    }
                                 }
-
-                                for (const auto& pair : element.getNameValueMap()) {
-                                    instrument.info[std::string(pair.first)] = pair.second;
-                                }
-
-                                instruments.push_back(instrument);
                             }
-                            return instruments;
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                            // Log error but don't crash, return empty or what we have
-                            // std::cerr << "Erisx Error: " << message.getElementList()[0].getValue(CCAPI_ERROR_MESSAGE) << std::endl;
                             return instruments;
                         }
                     }
@@ -65,8 +80,6 @@ public:
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
-
-        // Timeout
         return instruments;
     }
 
