@@ -36,6 +36,17 @@
 - **GateIO Perpetual Futures** : Passage de 0 à 592 instruments via itération des devises de règlement (`settle`).
 - **ErisX** : Désactivé suite à la migration vers Cboe Digital.
 - **Bybit** : Mise à jour vers l'API V5 (itération des catégories), mais validation impossible (Geoblocking).
+- **Binance USDS Futures** : Diagnostiqué comme fonctionnel mais Geo-bloqué (Erreur 451).
+
+## 7. Structure de Données (Instrument)
+- Enrichissement de la structure `Instrument` pour supporter les produits dérivés :
+    - `settle` (Devise de règlement)
+    - `expiry` (Date d'expiration)
+    - `strike_price` (Prix d'exercice)
+    - `option_type` (Call/Put)
+    - `contract_size` / `contract_multiplier`
+- Ajout de `toString()` pour le débogage.
+- Mise à jour des parsers manuels (Bitmex, Kraken, etc.) pour peupler ces nouveaux champs.
 
 ## Prochaines Étapes
 - Implémenter les méthodes de Market Data (Ticker, OrderBook, Trades) en utilisant cette nouvelle architecture unifiée.

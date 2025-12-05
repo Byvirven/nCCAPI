@@ -5,7 +5,7 @@ A standardized, header-only C++ wrapper for the [Crypto-Chassis CCAPI](https://g
 ## Features
 
 *   **Unified Interface**: Access multiple exchanges (Binance, Coinbase, Kraken, OKX, etc.) through a single `nccapi::Client`.
-*   **Simplified Data Structures**: Standardized `Instrument` struct for trading pairs.
+*   **Simplified Data Structures**: Standardized `Instrument` struct for trading pairs, supporting Spot, Futures, Options, and Swaps.
 *   **Header-Only Wrapper**: Easy integration (though dependencies must be linked).
 *   **Optimized Compilation**: Uses Pimpl and a **Unified Session** architecture to keep build times extremely low during development.
 
@@ -16,23 +16,37 @@ This project employs a "Unified Session" strategy.
 *   **Solution**: We isolate the CCAPI session instantiation into a single translation unit (`src/sessions/unified_session.cpp`) which supports *all* exchanges. This file is compiled once (~2-3 minutes).
 *   **Benefit**: All exchange logic (`src/exchanges/*.cpp`) uses a lightweight wrapper. Modifying logic only triggers a ~3 second recompilation.
 
-## Current Status (Refactoring Phase)
+## Supported Exchanges & Status
 
-We are currently in a major refactoring phase to normalize the API.
-**Completed:**
-*   Global `get_instruments()` (Fetch Pairs) implementation for supported exchanges.
-*   Factory pattern via `nccapi::Client`.
-*   **Architecture**: Transitioned to `UnifiedSession` (Shared Session) model.
-*   **Binance US**: Fixed `get_instruments` by using manual Generic Requests to bypass API limitations.
-*   **Bitmex**: Fixed crash by using manual Generic Requests and safe JSON parsing.
-*   **Bitget Futures**: Fixed empty instrument list by iterating over required product types.
-*   **Kraken Futures**: Fixed crash by using manual Generic Requests and safe JSON parsing.
-*   **GateIO Perpetual Futures**: Fixed empty instrument list by iterating over settlement currencies.
-*   **Bybit**: Updated to V5 API (iterating categories), but functionality not verifiable in geo-blocked environment.
-
-**Known Issues:**
-*   **Binance (Global)**: Fully functional logic, but often geo-blocked in cloud/CI environments.
-*   **ErisX**: Removed/Disabled as the exchange migrated to Cboe Digital.
+| Exchange | Fetch Instruments | Notes |
+| :--- | :--- | :--- |
+| **AscendEX** | ✅ | Functional |
+| **Binance** | ✅ (Blocked) | Logic correct, but Geo-blocked in CI/Cloud |
+| **Binance US** | ✅ | Fixed via manual Generic Request |
+| **Binance Coin Futures** | ✅ (Blocked) | Logic correct, but Geo-blocked in CI/Cloud |
+| **Binance USDS Futures** | ✅ (Blocked) | Logic correct, but Geo-blocked in CI/Cloud (Error 451) |
+| **Bitfinex** | ✅ | Functional |
+| **Bitget** | ✅ | Functional |
+| **Bitget Futures** | ✅ | Fixed via productType iteration |
+| **Bitmart** | ✅ | Functional |
+| **BitMEX** | ✅ | Fixed via manual Generic Request & Parsing |
+| **Bitstamp** | ✅ | Functional |
+| **Bybit** | ⚠️ | V5 Logic implemented, but Geo-blocked |
+| **Coinbase** | ✅ | Functional |
+| **Crypto.com** | ✅ | Functional |
+| **Deribit** | ✅ | Functional (Options/Futures parsed) |
+| **Gate.io** | ✅ | Functional |
+| **Gate.io Perpetual** | ✅ | Fixed via settlement iteration |
+| **Gemini** | ✅ | Functional |
+| **Huobi** | ✅ | Functional |
+| **Kraken** | ✅ | Functional |
+| **Kraken Futures** | ✅ | Fixed via manual Generic Request & Parsing |
+| **KuCoin** | ✅ | Functional |
+| **KuCoin Futures** | ✅ | Functional |
+| **MEXC** | ✅ | Functional |
+| **OKX** | ✅ | Functional |
+| **WhiteBIT** | ✅ | Functional |
+| **ErisX** | ❌ | Disabled (Migrated to Cboe Digital) |
 
 ## Dependencies & Installation
 
@@ -89,8 +103,9 @@ int main() {
         // 4. Display results
         std::cout << "Found " << instruments.size() << " instruments." << std::endl;
         for (const auto& inst : instruments) {
-            std::cout << "- " << inst.symbol << " (Base: " << inst.base_asset
-                      << ", Quote: " << inst.quote_asset << ")" << std::endl;
+            std::cout << "- " << inst.symbol << " (Base: " << inst.base
+                      << ", Quote: " << inst.quote
+                      << ", Type: " << inst.type << ")" << std::endl;
         }
 
     } catch (const std::exception& e) {
@@ -108,3 +123,4 @@ int main() {
 *   **`nccapi::UnifiedSession`**: A wrapper around `ccapi::Session` that enables all supported exchanges. Compiled once.
 *   **`nccapi::Exchange`**: Abstract base class. Concrete implementations (e.g., `Binance`) accept `UnifiedSession` via dependency injection.
 *   **`src/exchanges/*.cpp`**: Lightweight logic implementations.
+*   **`nccapi::Instrument`**: Polymorphic structure holding standardized instrument data (Spot, Future, Option details).

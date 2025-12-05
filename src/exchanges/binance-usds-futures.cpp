@@ -39,21 +39,15 @@ public:
                                 std::string qty_inc = element.getValue(CCAPI_ORDER_QUANTITY_INCREMENT);
                                 if (!qty_inc.empty()) { try { instrument.step_size = std::stod(qty_inc); } catch(...) {} }
 
-                                if (element.has(CCAPI_ORDER_QUOTE_QUANTITY_MIN)) {
-                                    std::string val = element.getValue(CCAPI_ORDER_QUOTE_QUANTITY_MIN);
-                                    if(!val.empty()) { try { instrument.min_notional = std::stod(val); } catch(...) {} }
-                                }
+                                std::string qty_min = element.getValue(CCAPI_ORDER_QUANTITY_MIN);
+                                if (!qty_min.empty()) { try { instrument.min_size = std::stod(qty_min); } catch(...) {} }
 
                                 if (!instrument.base.empty() && !instrument.quote.empty()) {
                                     instrument.symbol = instrument.base + "/" + instrument.quote;
                                 } else {
                                     instrument.symbol = instrument.id;
                                 }
-                                instrument.type = "future"; // or swap
-
-                                if (element.has(CCAPI_INSTRUMENT_STATUS)) {
-                                    instrument.active = (element.getValue(CCAPI_INSTRUMENT_STATUS) == "TRADING");
-                                }
+                                instrument.type = "future"; // Default
 
                                 for (const auto& pair : element.getNameValueMap()) {
                                     instrument.info[std::string(pair.first)] = pair.second;
@@ -63,7 +57,7 @@ public:
                             }
                             return instruments;
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                             return instruments;
+                            return instruments;
                         }
                     }
                 }
