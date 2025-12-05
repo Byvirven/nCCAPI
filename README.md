@@ -28,7 +28,7 @@ A standardized, header-only C++ wrapper for the [Crypto-Chassis CCAPI](https://g
 | Bitmart | ✅ |
 | BitMEX | ✅ |
 | Bitstamp | ✅ |
-| Bybit | ⚠️ (Geo-blocked) |
+| Bybit | ✅ |
 | Coinbase | ✅ |
 | Crypto.com | ✅ |
 | Deribit | ✅ |
