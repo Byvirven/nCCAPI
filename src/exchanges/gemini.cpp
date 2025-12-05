@@ -18,13 +18,10 @@ public:
         std::vector<Instrument> instruments;
         ccapi::Request request(ccapi::Request::Operation::GET_INSTRUMENTS, "gemini");
 
-        // Specific fix for OKX if needed, or generic request
-        // For now, standard request
-
         session->sendRequest(request);
 
         auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(10)) {
+        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
             std::vector<ccapi::Event> events = session->getEventQueue().purge();
             for (const auto& event : events) {
                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
@@ -48,6 +45,9 @@ public:
                                     instrument.symbol = instrument.id; // Fallback
                                 }
 
+                                // Gemini is a Spot exchange primarily
+                                instrument.type = "spot";
+
                                 for (const auto& pair : element.getNameValueMap()) {
                                     instrument.info[std::string(pair.first)] = pair.second;
                                 }
@@ -56,8 +56,6 @@ public:
                             }
                             return instruments;
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                            // Log error but don't crash, return empty or what we have
-                            // std::cerr << "Gemini Error: " << message.getElementList()[0].getValue(CCAPI_ERROR_MESSAGE) << std::endl;
                             return instruments;
                         }
                     }
@@ -66,7 +64,6 @@ public:
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
 
-        // Timeout
         return instruments;
     }
 

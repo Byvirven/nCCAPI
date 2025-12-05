@@ -2,6 +2,11 @@
 
 A standardized, header-only C++ wrapper for the [Crypto-Chassis CCAPI](https://github.com/crypto-chassis/ccapi) library. nCCAPI provides a unified interface similar to CCXT, allowing developers to interact with multiple cryptocurrency exchanges using a single, consistent API.
 
+## Documentation
+
+*   **[Architecture Overview](docs/ARCHITECTURE.md)**: Learn about the Unified Session, Pimpl idiom, and compilation optimizations.
+*   **[Exchange Details & Quirks](docs/EXCHANGE_DETAILS.md)**: Detailed status of each exchange, including specific implementation notes and workarounds.
+
 ## Features
 
 *   **Unified Interface**: Access multiple exchanges (Binance, Coinbase, Kraken, OKX, etc.) through a single `nccapi::Client`.
@@ -9,44 +14,36 @@ A standardized, header-only C++ wrapper for the [Crypto-Chassis CCAPI](https://g
 *   **Header-Only Wrapper**: Easy integration (though dependencies must be linked).
 *   **Optimized Compilation**: Uses Pimpl and a **Unified Session** architecture to keep build times extremely low during development.
 
-## Build Time Optimization
+## Supported Exchanges
 
-This project employs a "Unified Session" strategy.
-*   **Problem**: CCAPI is header-only and uses heavy template meta-programming. Compiling support for 30+ exchanges usually takes 45+ minutes.
-*   **Solution**: We isolate the CCAPI session instantiation into a single translation unit (`src/sessions/unified_session.cpp`) which supports *all* exchanges. This file is compiled once (~2-3 minutes).
-*   **Benefit**: All exchange logic (`src/exchanges/*.cpp`) uses a lightweight wrapper. Modifying logic only triggers a ~3 second recompilation.
-
-## Supported Exchanges & Status
-
-| Exchange | Fetch Instruments | Notes |
-| :--- | :--- | :--- |
-| **AscendEX** | ✅ | Functional |
-| **Binance** | ✅ (Blocked) | Logic correct, but Geo-blocked in CI/Cloud |
-| **Binance US** | ✅ | Fixed via manual Generic Request |
-| **Binance Coin Futures** | ✅ (Blocked) | Logic correct, but Geo-blocked in CI/Cloud |
-| **Binance USDS Futures** | ✅ (Blocked) | Logic correct, but Geo-blocked in CI/Cloud (Error 451) |
-| **Bitfinex** | ✅ | Functional |
-| **Bitget** | ✅ | Functional |
-| **Bitget Futures** | ✅ | Fixed via productType iteration |
-| **Bitmart** | ✅ | Functional |
-| **BitMEX** | ✅ | Fixed via manual Generic Request & Parsing |
-| **Bitstamp** | ✅ | Functional |
-| **Bybit** | ⚠️ | V5 Logic implemented, but Geo-blocked |
-| **Coinbase** | ✅ | Functional |
-| **Crypto.com** | ✅ | Functional |
-| **Deribit** | ✅ | Functional (Options/Futures parsed) |
-| **Gate.io** | ✅ | Functional |
-| **Gate.io Perpetual** | ✅ | Fixed via settlement iteration |
-| **Gemini** | ✅ | Functional |
-| **Huobi** | ✅ | Functional |
-| **Kraken** | ✅ | Functional |
-| **Kraken Futures** | ✅ | Fixed via manual Generic Request & Parsing |
-| **KuCoin** | ✅ | Functional |
-| **KuCoin Futures** | ✅ | Functional |
-| **MEXC** | ✅ | Functional |
-| **OKX** | ✅ | Functional |
-| **WhiteBIT** | ✅ | Functional |
-| **ErisX** | ❌ | Disabled (Migrated to Cboe Digital) |
+| Exchange | Status |
+| :--- | :--- |
+| AscendEX | ✅ |
+| Binance | ✅ |
+| Binance US | ✅ |
+| Binance Futures | ✅ |
+| Bitfinex | ✅ |
+| Bitget | ✅ |
+| Bitget Futures | ✅ |
+| Bitmart | ✅ |
+| BitMEX | ✅ |
+| Bitstamp | ✅ |
+| Bybit | ⚠️ (Geo-blocked) |
+| Coinbase | ✅ |
+| Crypto.com | ✅ |
+| Deribit | ✅ |
+| Gate.io | ✅ |
+| Gate.io Perpetual | ✅ |
+| Gemini | ✅ |
+| Huobi | ✅ |
+| Kraken | ✅ |
+| Kraken Futures | ✅ |
+| KuCoin | ✅ |
+| KuCoin Futures | ✅ |
+| MEXC | ✅ |
+| MEXC Futures | ✅ |
+| OKX | ✅ |
+| WhiteBIT | ✅ |
 
 ## Dependencies & Installation
 
@@ -116,11 +113,3 @@ int main() {
     return 0;
 }
 ```
-
-## Architecture
-
-*   **`nccapi::Client`**: The entry point. Creates and holds the `UnifiedSession`.
-*   **`nccapi::UnifiedSession`**: A wrapper around `ccapi::Session` that enables all supported exchanges. Compiled once.
-*   **`nccapi::Exchange`**: Abstract base class. Concrete implementations (e.g., `Binance`) accept `UnifiedSession` via dependency injection.
-*   **`src/exchanges/*.cpp`**: Lightweight logic implementations.
-*   **`nccapi::Instrument`**: Polymorphic structure holding standardized instrument data (Spot, Future, Option details).

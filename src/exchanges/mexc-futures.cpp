@@ -7,6 +7,7 @@
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
+#include "ccapi_cpp/ccapi_macro.h"
 
 namespace nccapi {
 
@@ -17,9 +18,6 @@ public:
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
         ccapi::Request request(ccapi::Request::Operation::GET_INSTRUMENTS, "mexc-futures");
-
-        // Specific fix for OKX if needed, or generic request
-        // For now, standard request
 
         session->sendRequest(request);
 
@@ -36,17 +34,26 @@ public:
                                 instrument.base = element.getValue(CCAPI_BASE_ASSET);
                                 instrument.quote = element.getValue(CCAPI_QUOTE_ASSET);
 
+                                if (element.has(CCAPI_SETTLE_ASSET)) instrument.settle = element.getValue(CCAPI_SETTLE_ASSET);
+
                                 std::string price_inc = element.getValue(CCAPI_ORDER_PRICE_INCREMENT);
-                                if (!price_inc.empty()) instrument.tick_size = std::stod(price_inc);
+                                if (!price_inc.empty()) { try { instrument.tick_size = std::stod(price_inc); } catch(...) {} }
+
+                                if(element.has(CCAPI_CONTRACT_SIZE)) {
+                                     std::string val = element.getValue(CCAPI_CONTRACT_SIZE);
+                                     if(!val.empty()) { try { instrument.contract_size = std::stod(val); } catch(...) {} }
+                                }
 
                                 std::string qty_inc = element.getValue(CCAPI_ORDER_QUANTITY_INCREMENT);
-                                if (!qty_inc.empty()) instrument.step_size = std::stod(qty_inc);
+                                if (!qty_inc.empty()) { try { instrument.step_size = std::stod(qty_inc); } catch(...) {} }
 
                                 if (!instrument.base.empty() && !instrument.quote.empty()) {
                                     instrument.symbol = instrument.base + "/" + instrument.quote;
                                 } else {
                                     instrument.symbol = instrument.id; // Fallback
                                 }
+
+                                instrument.type = "future";
 
                                 for (const auto& pair : element.getNameValueMap()) {
                                     instrument.info[std::string(pair.first)] = pair.second;
@@ -56,8 +63,6 @@ public:
                             }
                             return instruments;
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                            // Log error but don't crash, return empty or what we have
-                            // std::cerr << "MexcFutures Error: " << message.getElementList()[0].getValue(CCAPI_ERROR_MESSAGE) << std::endl;
                             return instruments;
                         }
                     }
@@ -66,7 +71,6 @@ public:
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
 
-        // Timeout
         return instruments;
     }
 

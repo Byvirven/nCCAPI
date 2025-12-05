@@ -47,6 +47,7 @@ public:
                                 } else {
                                     instrument.symbol = instrument.id;
                                 }
+                                // Huobi 'huobi' is spot
                                 instrument.type = "spot";
 
                                 for (const auto& pair : element.getNameValueMap()) {
