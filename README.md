@@ -23,7 +23,9 @@ We are currently in a major refactoring phase to normalize the API.
 *   Global `get_instruments()` (Fetch Pairs) implementation for supported exchanges.
 *   Factory pattern via `nccapi::Client`.
 *   **Architecture**: Transitioned to `UnifiedSession` (Shared Session) model.
-*   **Binance US**: Fixed `get_instruments` by using manual Generic Requests to bypass API limitations. Verified functional.
+*   **Binance US**: Fixed `get_instruments` by using manual Generic Requests to bypass API limitations.
+*   **Bitmex**: Fixed crash by using manual Generic Requests and safe JSON parsing.
+*   **Bitget Futures**: Fixed empty instrument list by iterating over required product types.
 
 **Known Issues:**
 *   **Binance (Global)**: Fully functional logic, but often geo-blocked in cloud/CI environments.
