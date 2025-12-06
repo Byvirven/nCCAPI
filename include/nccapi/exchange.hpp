@@ -4,7 +4,9 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <stdexcept>
 #include "nccapi/instrument.hpp"
+#include "nccapi/candle.hpp"
 
 namespace nccapi {
 
@@ -26,6 +28,21 @@ public:
      * @brief Get the exchange name.
      */
     virtual std::string get_name() const = 0;
+
+    /**
+     * @brief Get historical candles (OHLCV) for a specific instrument.
+     * @param instrument_name The instrument identifier (e.g., "BTC-USDT").
+     * @param timeframe The time interval (e.g., "1m", "1h"). Default is "1m".
+     * @param from_date Start timestamp in milliseconds.
+     * @param to_date End timestamp in milliseconds.
+     * @return std::vector<Candle> List of candles.
+     */
+    virtual std::vector<Candle> get_historical_candles(const std::string& instrument_name,
+                                                       const std::string& timeframe,
+                                                       int64_t from_date,
+                                                       int64_t to_date) {
+        throw std::runtime_error("get_historical_candles not implemented for " + get_name());
+    }
 
     // Future generic methods will go here
 };

@@ -30,6 +30,74 @@ public:
         return all_instruments;
     }
 
+    std::vector<Candle> get_historical_candles(const std::string& instrument_name,
+                                               const std::string& timeframe,
+                                               int64_t from_date,
+                                               int64_t to_date) {
+        std::vector<Candle> candles;
+        ccapi::Request request(ccapi::Request::Operation::GET_RECENT_CANDLESTICKS, "okx", instrument_name);
+
+        // OKX intervals: 1m, 3m, 5m, 15m, 30m, 1H, 2H, 4H, 6H, 12H, 1D, 1W, 1M, 3M, 6M, 1Y
+
+        int interval_seconds = 60;
+        if (timeframe == "1m") interval_seconds = 60;
+        else if (timeframe == "3m") interval_seconds = 180;
+        else if (timeframe == "5m") interval_seconds = 300;
+        else if (timeframe == "15m") interval_seconds = 900;
+        else if (timeframe == "30m") interval_seconds = 1800;
+        else if (timeframe == "1h") interval_seconds = 3600;
+        else if (timeframe == "2h") interval_seconds = 7200;
+        else if (timeframe == "4h") interval_seconds = 14400;
+        else if (timeframe == "6h") interval_seconds = 21600;
+        else if (timeframe == "12h") interval_seconds = 43200;
+        else if (timeframe == "1d") interval_seconds = 86400;
+        else if (timeframe == "1w") interval_seconds = 604800;
+        else interval_seconds = 60;
+
+        request.appendParam({
+            {CCAPI_CANDLESTICK_INTERVAL_SECONDS, std::to_string(interval_seconds)},
+            {CCAPI_START_TIME_SECONDS, std::to_string(from_date / 1000)},
+            {CCAPI_END_TIME_SECONDS, std::to_string(to_date / 1000)}
+        });
+
+        session->sendRequest(request);
+
+        auto start = std::chrono::steady_clock::now();
+        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+            std::vector<ccapi::Event> events = session->getEventQueue().purge();
+            for (const auto& event : events) {
+                if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                    for (const auto& message : event.getMessageList()) {
+                        if (message.getType() == ccapi::Message::Type::GET_RECENT_CANDLESTICKS) {
+                            for (const auto& element : message.getElementList()) {
+                                Candle candle;
+                                std::string ts_str = element.getValue("TIMESTAMP");
+                                if (!ts_str.empty()) {
+                                    candle.timestamp = std::stoull(ts_str);
+                                }
+                                candle.open = std::stod(element.getValue(CCAPI_OPEN_PRICE));
+                                candle.high = std::stod(element.getValue(CCAPI_HIGH_PRICE));
+                                candle.low = std::stod(element.getValue(CCAPI_LOW_PRICE));
+                                candle.close = std::stod(element.getValue(CCAPI_CLOSE_PRICE));
+                                candle.volume = std::stod(element.getValue(CCAPI_VOLUME));
+
+                                candles.push_back(candle);
+                            }
+                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                                return a.timestamp < b.timestamp;
+                            });
+                            return candles;
+                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                            return candles;
+                        }
+                    }
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        return candles;
+    }
+
 private:
     std::shared_ptr<UnifiedSession> session;
 
@@ -121,6 +189,13 @@ Okx::~Okx() = default;
 
 std::vector<Instrument> Okx::get_instruments() {
     return pimpl->get_instruments();
+}
+
+std::vector<Candle> Okx::get_historical_candles(const std::string& instrument_name,
+                                                     const std::string& timeframe,
+                                                     int64_t from_date,
+                                                     int64_t to_date) {
+    return pimpl->get_historical_candles(instrument_name, timeframe, from_date, to_date);
 }
 
 } // namespace nccapi

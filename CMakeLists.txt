@@ -49,3 +49,7 @@ endif()
 # Test Executable
 add_executable(test_structure tests/test_structure.cpp)
 target_link_libraries(test_structure nccapi OpenSSL::SSL OpenSSL::Crypto Threads::Threads ZLIB::ZLIB dl)
+
+# Test Historical
+add_executable(test_historical src/test_historical.cpp)
+target_link_libraries(test_historical nccapi OpenSSL::SSL OpenSSL::Crypto Threads::Threads ZLIB::ZLIB dl)

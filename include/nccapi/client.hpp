@@ -7,6 +7,7 @@
 #include <map>
 #include "nccapi/instrument.hpp"
 #include "nccapi/exchange.hpp"
+#include "nccapi/candle.hpp"
 
 namespace nccapi {
 
@@ -29,6 +30,21 @@ public:
      * @return List of instruments. Throws if exchange is not supported or on error.
      */
     std::vector<Instrument> get_pairs(const std::string& exchange_name);
+
+    /**
+     * @brief Generic function to get historical candles from any exchange.
+     * @param exchange_name The name of the exchange.
+     * @param instrument_name The instrument identifier.
+     * @param timeframe The time interval (default "1m").
+     * @param from_date Start timestamp in milliseconds (0 for exchange default).
+     * @param to_date End timestamp in milliseconds (0 for now).
+     * @return List of candles.
+     */
+    std::vector<Candle> get_historical_candles(const std::string& exchange_name,
+                                               const std::string& instrument_name,
+                                               const std::string& timeframe = "1m",
+                                               int64_t from_date = 0,
+                                               int64_t to_date = 0);
 
     /**
      * @brief Access the specific exchange instance directly if needed.

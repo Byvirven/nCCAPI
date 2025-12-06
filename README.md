@@ -105,6 +105,21 @@ int main() {
                       << ", Type: " << inst.type << ")" << std::endl;
         }
 
+        // 5. Fetch Historical Data (Candles)
+        if (!instruments.empty()) {
+            std::string symbol = instruments[0].id;
+            std::cout << "Fetching candles for " << symbol << "..." << std::endl;
+
+            // Fetch candles: 1 minute timeframe, defaults to recent lookback
+            auto candles = client.get_historical_candles(exchange_name, symbol, "1m");
+
+            std::cout << "Received " << candles.size() << " candles." << std::endl;
+            if (!candles.empty()) {
+                std::cout << "First candle: " << candles[0].toString() << std::endl;
+                std::cout << "Last candle: " << candles.back().toString() << std::endl;
+            }
+        }
+
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
         return 1;

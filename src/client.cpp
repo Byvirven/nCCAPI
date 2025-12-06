@@ -103,4 +103,25 @@ std::vector<Instrument> Client::get_pairs(const std::string& exchange_name) {
     return exchange->get_instruments();
 }
 
+std::vector<Candle> Client::get_historical_candles(const std::string& exchange_name,
+                                                   const std::string& instrument_name,
+                                                   const std::string& timeframe,
+                                                   int64_t from_date,
+                                                   int64_t to_date) {
+    auto exchange = get_exchange(exchange_name);
+
+    // Set default logic if needed, although generic default args handle it.
+    // However, if the user passes 0, we can interpret it as defaults here if specific logic requires it.
+    // For now, pass directly.
+    int64_t actual_to_date = to_date;
+    if (actual_to_date <= 0) {
+        actual_to_date = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+    }
+
+    // For from_date, if 0, we leave it to the exchange to decide the default lookback.
+
+    return exchange->get_historical_candles(instrument_name, timeframe, from_date, actual_to_date);
+}
+
 } // namespace nccapi

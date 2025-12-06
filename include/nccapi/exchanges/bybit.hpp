@@ -14,6 +14,10 @@ public:
     ~Bybit() override;
 
     std::vector<Instrument> get_instruments() override;
+    std::vector<Candle> get_historical_candles(const std::string& instrument_name,
+                                               const std::string& timeframe,
+                                               int64_t from_date,
+                                               int64_t to_date) override;
     std::string get_name() const override { return "bybit"; }
 
 private:
