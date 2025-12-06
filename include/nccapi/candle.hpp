@@ -11,12 +11,12 @@ namespace nccapi {
  * @brief Represents a single OHLCV candlestick.
  */
 struct Candle {
-    uint64_t timestamp; // Timestamp in milliseconds
-    double open;
-    double high;
-    double low;
-    double close;
-    double volume;
+    uint64_t timestamp = 0; // Timestamp in milliseconds
+    double open = 0.0;
+    double high = 0.0;
+    double low = 0.0;
+    double close = 0.0;
+    double volume = 0.0;
 
     std::string toString() const {
         std::stringstream ss;

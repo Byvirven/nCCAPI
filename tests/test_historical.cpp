@@ -40,8 +40,8 @@ int main(int argc, char* argv[]) {
     if (argc > 1) {
         exchanges_to_test.push_back(argv[1]);
     } else {
-        // Default to testing a safe exchange first, or all supported
-        exchanges_to_test.push_back("coinbase");
+        // Default to testing all supported exchanges
+        exchanges_to_test = client.get_supported_exchanges();
     }
 
     for (const auto& exchange_name : exchanges_to_test) {
