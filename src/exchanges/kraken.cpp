@@ -7,6 +7,8 @@
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
+#include "ccapi_cpp/ccapi_macro.h"
+#include "rapidjson/document.h"
 
 namespace nccapi {
 
@@ -75,10 +77,11 @@ public:
                                                int64_t from_date,
                                                int64_t to_date) {
         std::vector<Candle> candles;
-        // Kraken uses GET_RECENT_CANDLESTICKS -> /0/public/OHLC
-        ccapi::Request request(ccapi::Request::Operation::GET_RECENT_CANDLESTICKS, "kraken", instrument_name);
 
-        // Kraken interval is in minutes (1, 5, 15, 30, 60, 240, 1440, 10080, 21600)
+        // Use GENERIC_PUBLIC_REQUEST for Kraken
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "kraken", "", "GET_OHLC");
+
+        // Kraken interval is in minutes
         int interval_minutes = 1;
         if (timeframe == "1m") interval_minutes = 1;
         else if (timeframe == "5m") interval_minutes = 5;
@@ -90,13 +93,12 @@ public:
         else if (timeframe == "1w") interval_minutes = 10080;
         else interval_minutes = 1;
 
-        // Kraken takes "since" (seconds?) or ccapi handles it?
-        // CCAPI maps CCAPI_START_TIME_SECONDS to "since".
-
         request.appendParam({
-            {CCAPI_CANDLESTICK_INTERVAL_SECONDS, std::to_string(interval_minutes * 60)}, // CCAPI expects seconds for consistency
-            {CCAPI_START_TIME_SECONDS, std::to_string(from_date / 1000)}
-            // Kraken doesn't support explicit end time for OHLC, it returns since 'since'.
+            {CCAPI_HTTP_PATH, "/0/public/OHLC"},
+            {CCAPI_HTTP_METHOD, "GET"},
+            {"pair", instrument_name},
+            {"interval", std::to_string(interval_minutes)},
+            {"since", std::to_string(from_date / 1000)} // Seconds
         });
 
         session->sendRequest(request);
@@ -107,28 +109,56 @@ public:
             for (const auto& event : events) {
                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
                     for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GET_RECENT_CANDLESTICKS) {
+                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
                             for (const auto& element : message.getElementList()) {
-                                Candle candle;
-                                std::string ts_str = element.getValue("TIMESTAMP"); // Raw string lookup
-                                if (!ts_str.empty()) {
-                                    candle.timestamp = std::stoull(ts_str);
+                                if (element.has(CCAPI_HTTP_BODY)) {
+                                    std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                    rapidjson::Document doc;
+                                    doc.Parse(json_str.c_str());
+
+                                    if (!doc.HasParseError() && doc.HasMember("result")) {
+                                        const auto& result = doc["result"];
+                                        // Kraken returns a map where key is the pair name (which might differ from requested symbol)
+                                        // We just iterate the first member that is an array
+                                        for (auto& m : result.GetObject()) {
+                                            if (m.value.IsArray()) {
+                                                for (const auto& item : m.value.GetArray()) {
+                                                    // [int <time>, string <open>, string <high>, string <low>, string <close>, string <vwap>, string <volume>, int <count>]
+                                                    if (item.Size() >= 8) {
+                                                        Candle candle;
+                                                        candle.timestamp = (int64_t)item[0].GetInt64() * 1000;
+
+                                                        // Kraken returns strings or numbers depending on API version/wrapper?
+                                                        // Docs say strings/float. RapidJSON might see them as strings.
+                                                        // Let's handle both.
+
+                                                        auto getVal = [](const rapidjson::Value& v) -> double {
+                                                            if (v.IsString()) return std::stod(v.GetString());
+                                                            if (v.IsDouble()) return v.GetDouble();
+                                                            if (v.IsInt64()) return (double)v.GetInt64();
+                                                            return 0.0;
+                                                        };
+
+                                                        candle.open = getVal(item[1]);
+                                                        candle.high = getVal(item[2]);
+                                                        candle.low = getVal(item[3]);
+                                                        candle.close = getVal(item[4]);
+                                                        candle.volume = getVal(item[6]); // Volume is index 6
+
+                                                        candles.push_back(candle);
+                                                    }
+                                                }
+                                                // Break after finding the array (there's usually "last" field too)
+                                                break;
+                                            }
+                                        }
+                                        std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                                            return a.timestamp < b.timestamp;
+                                        });
+                                        return candles;
+                                    }
                                 }
-                                candle.open = std::stod(element.getValue(CCAPI_OPEN_PRICE));
-                                candle.high = std::stod(element.getValue(CCAPI_HIGH_PRICE));
-                                candle.low = std::stod(element.getValue(CCAPI_LOW_PRICE));
-                                candle.close = std::stod(element.getValue(CCAPI_CLOSE_PRICE));
-                                candle.volume = std::stod(element.getValue(CCAPI_VOLUME));
-
-                                // Filter by to_date if Kraken returns more
-                                if (to_date > 0 && candle.timestamp > to_date) continue;
-
-                                candles.push_back(candle);
                             }
-                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                return a.timestamp < b.timestamp;
-                            });
-                            return candles;
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
                             return candles;
                         }

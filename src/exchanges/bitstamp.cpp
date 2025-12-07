@@ -7,6 +7,8 @@
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
+#include "ccapi_cpp/ccapi_macro.h"
+#include "rapidjson/document.h"
 
 namespace nccapi {
 
@@ -67,6 +69,96 @@ public:
         return instruments;
     }
 
+    std::vector<Candle> get_historical_candles(const std::string& instrument_name,
+                                               const std::string& timeframe,
+                                               int64_t from_date,
+                                               int64_t to_date) {
+        std::vector<Candle> candles;
+
+        // Use GENERIC_PUBLIC_REQUEST for Bitstamp
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitstamp", "", "GET_OHLC");
+
+        // Bitstamp: step in seconds
+        int interval_seconds = 60;
+        if (timeframe == "1m") interval_seconds = 60;
+        else if (timeframe == "3m") interval_seconds = 180;
+        else if (timeframe == "5m") interval_seconds = 300;
+        else if (timeframe == "15m") interval_seconds = 900;
+        else if (timeframe == "30m") interval_seconds = 1800;
+        else if (timeframe == "1h") interval_seconds = 3600;
+        else if (timeframe == "2h") interval_seconds = 7200;
+        else if (timeframe == "4h") interval_seconds = 14400;
+        else if (timeframe == "6h") interval_seconds = 21600;
+        else if (timeframe == "12h") interval_seconds = 43200;
+        else if (timeframe == "1d") interval_seconds = 86400;
+        else if (timeframe == "3d") interval_seconds = 259200;
+        else interval_seconds = 60;
+
+        // Path: /api/v2/ohlc/{pair}/
+        std::string path = "/api/v2/ohlc/" + instrument_name + "/";
+
+        request.appendParam({
+            {CCAPI_HTTP_PATH, path},
+            {CCAPI_HTTP_METHOD, "GET"},
+            {"step", std::to_string(interval_seconds)},
+            {"start", std::to_string(from_date / 1000)},
+            {"end", std::to_string(to_date / 1000)},
+            {"limit", "1000"}
+        });
+
+        session->sendRequest(request);
+
+        auto start = std::chrono::steady_clock::now();
+        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+            std::vector<ccapi::Event> events = session->getEventQueue().purge();
+            for (const auto& event : events) {
+                if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                    for (const auto& message : event.getMessageList()) {
+                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                            for (const auto& element : message.getElementList()) {
+                                if (element.has(CCAPI_HTTP_BODY)) {
+                                    std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                    rapidjson::Document doc;
+                                    doc.Parse(json_str.c_str());
+
+                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].HasMember("ohlc")) {
+                                        const auto& ohlc = doc["data"]["ohlc"];
+                                        if (ohlc.IsArray()) {
+                                            for (const auto& item : ohlc.GetArray()) {
+                                                // {"high": "...", "timestamp": "...", "volume": "...", "low": "...", "close": "...", "open": "..."}
+                                                if (item.IsObject()) {
+                                                    Candle candle;
+                                                    if (item.HasMember("timestamp")) {
+                                                        candle.timestamp = (int64_t)std::stoll(item["timestamp"].GetString()) * 1000;
+                                                    }
+                                                    if (item.HasMember("open")) candle.open = std::stod(item["open"].GetString());
+                                                    if (item.HasMember("high")) candle.high = std::stod(item["high"].GetString());
+                                                    if (item.HasMember("low")) candle.low = std::stod(item["low"].GetString());
+                                                    if (item.HasMember("close")) candle.close = std::stod(item["close"].GetString());
+                                                    if (item.HasMember("volume")) candle.volume = std::stod(item["volume"].GetString());
+
+                                                    candles.push_back(candle);
+                                                }
+                                            }
+                                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                                                return a.timestamp < b.timestamp;
+                                            });
+                                            return candles;
+                                        }
+                                    }
+                                }
+                            }
+                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                            return candles;
+                        }
+                    }
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        return candles;
+    }
+
 private:
     std::shared_ptr<UnifiedSession> session;
 };
@@ -76,6 +168,13 @@ Bitstamp::~Bitstamp() = default;
 
 std::vector<Instrument> Bitstamp::get_instruments() {
     return pimpl->get_instruments();
+}
+
+std::vector<Candle> Bitstamp::get_historical_candles(const std::string& instrument_name,
+                                                     const std::string& timeframe,
+                                                     int64_t from_date,
+                                                     int64_t to_date) {
+    return pimpl->get_historical_candles(instrument_name, timeframe, from_date, to_date);
 }
 
 } // namespace nccapi

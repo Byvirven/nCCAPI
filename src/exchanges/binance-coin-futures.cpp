@@ -75,6 +75,77 @@ public:
         return instruments;
     }
 
+    std::vector<Candle> get_historical_candles(const std::string& instrument_name,
+                                               const std::string& timeframe,
+                                               int64_t from_date,
+                                               int64_t to_date) {
+        std::vector<Candle> candles;
+        ccapi::Request request(ccapi::Request::Operation::GET_RECENT_CANDLESTICKS, "binance-coin-futures", instrument_name);
+
+        request.appendParam({
+            {CCAPI_CANDLESTICK_INTERVAL_SECONDS, std::to_string(timeframeToSeconds(timeframe))},
+            {CCAPI_START_TIME_SECONDS, std::to_string(from_date / 1000)},
+            {CCAPI_END_TIME_SECONDS, std::to_string(to_date / 1000)},
+            {"limit", "1000"}
+        });
+
+        session->sendRequest(request);
+
+        auto start = std::chrono::steady_clock::now();
+        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+            std::vector<ccapi::Event> events = session->getEventQueue().purge();
+            for (const auto& event : events) {
+                if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                    for (const auto& message : event.getMessageList()) {
+                        if (message.getType() == ccapi::Message::Type::GET_RECENT_CANDLESTICKS) {
+                            for (const auto& element : message.getElementList()) {
+                                Candle candle;
+                                std::string ts_str = element.getValue("TIMESTAMP");
+                                if (!ts_str.empty()) {
+                                    candle.timestamp = std::stoull(ts_str);
+                                }
+                                candle.open = std::stod(element.getValue(CCAPI_OPEN_PRICE));
+                                candle.high = std::stod(element.getValue(CCAPI_HIGH_PRICE));
+                                candle.low = std::stod(element.getValue(CCAPI_LOW_PRICE));
+                                candle.close = std::stod(element.getValue(CCAPI_CLOSE_PRICE));
+                                candle.volume = std::stod(element.getValue(CCAPI_VOLUME));
+
+                                candles.push_back(candle);
+                            }
+                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                                return a.timestamp < b.timestamp;
+                            });
+                            return candles;
+                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                            return candles;
+                        }
+                    }
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        return candles;
+    }
+
+    int timeframeToSeconds(const std::string& timeframe) {
+        if (timeframe == "1m") return 60;
+        if (timeframe == "3m") return 180;
+        if (timeframe == "5m") return 300;
+        if (timeframe == "15m") return 900;
+        if (timeframe == "30m") return 1800;
+        if (timeframe == "1h") return 3600;
+        if (timeframe == "2h") return 7200;
+        if (timeframe == "4h") return 14400;
+        if (timeframe == "6h") return 21600;
+        if (timeframe == "8h") return 28800;
+        if (timeframe == "12h") return 43200;
+        if (timeframe == "1d") return 86400;
+        if (timeframe == "3d") return 259200;
+        if (timeframe == "1w") return 604800;
+        if (timeframe == "1M") return 2592000;
+        return 60;
+    }
+
 private:
     std::shared_ptr<UnifiedSession> session;
 };
@@ -84,6 +155,13 @@ BinanceCoinFutures::~BinanceCoinFutures() = default;
 
 std::vector<Instrument> BinanceCoinFutures::get_instruments() {
     return pimpl->get_instruments();
+}
+
+std::vector<Candle> BinanceCoinFutures::get_historical_candles(const std::string& instrument_name,
+                                                     const std::string& timeframe,
+                                                     int64_t from_date,
+                                                     int64_t to_date) {
+    return pimpl->get_historical_candles(instrument_name, timeframe, from_date, to_date);
 }
 
 } // namespace nccapi

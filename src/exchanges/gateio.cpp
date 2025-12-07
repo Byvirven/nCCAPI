@@ -7,6 +7,8 @@
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
+#include "ccapi_cpp/ccapi_macro.h"
+#include "rapidjson/document.h"
 
 namespace nccapi {
 
@@ -69,25 +71,30 @@ public:
                                                int64_t from_date,
                                                int64_t to_date) {
         std::vector<Candle> candles;
-        ccapi::Request request(ccapi::Request::Operation::GET_RECENT_CANDLESTICKS, "gateio", instrument_name);
 
-        // GateIO timeframe in seconds
-        int interval_seconds = 60;
-        if (timeframe == "1m") interval_seconds = 60;
-        else if (timeframe == "5m") interval_seconds = 300;
-        else if (timeframe == "15m") interval_seconds = 900;
-        else if (timeframe == "30m") interval_seconds = 1800;
-        else if (timeframe == "1h") interval_seconds = 3600;
-        else if (timeframe == "4h") interval_seconds = 14400;
-        else if (timeframe == "8h") interval_seconds = 28800;
-        else if (timeframe == "1d") interval_seconds = 86400;
-        else if (timeframe == "7d") interval_seconds = 604800;
-        else interval_seconds = 60;
+        // Use GENERIC_PUBLIC_REQUEST for GateIO
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "gateio", "", "GET_CANDLESTICKS");
+
+        // GateIO timeframe: 10s, 1m, 5m, 15m, 30m, 1h, 4h, 8h, 1d, 7d
+        std::string interval = "1m";
+        if (timeframe == "1m") interval = "1m";
+        else if (timeframe == "5m") interval = "5m";
+        else if (timeframe == "15m") interval = "15m";
+        else if (timeframe == "30m") interval = "30m";
+        else if (timeframe == "1h") interval = "1h";
+        else if (timeframe == "4h") interval = "4h";
+        else if (timeframe == "8h") interval = "8h";
+        else if (timeframe == "1d") interval = "1d";
+        else if (timeframe == "7d") interval = "7d";
+        else interval = "1m";
 
         request.appendParam({
-            {CCAPI_CANDLESTICK_INTERVAL_SECONDS, std::to_string(interval_seconds)},
-            {CCAPI_START_TIME_SECONDS, std::to_string(from_date / 1000)},
-            {CCAPI_END_TIME_SECONDS, std::to_string(to_date / 1000)}
+            {CCAPI_HTTP_PATH, "/api/v4/spot/candlesticks"},
+            {CCAPI_HTTP_METHOD, "GET"},
+            {"currency_pair", instrument_name},
+            {"interval", interval},
+            {"from", std::to_string(from_date / 1000)}, // Seconds
+            {"to", std::to_string(to_date / 1000)}
         });
 
         session->sendRequest(request);
@@ -98,25 +105,52 @@ public:
             for (const auto& event : events) {
                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
                     for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GET_RECENT_CANDLESTICKS) {
+                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
                             for (const auto& element : message.getElementList()) {
-                                Candle candle;
-                                std::string ts_str = element.getValue("TIMESTAMP");
-                                if (!ts_str.empty()) {
-                                    candle.timestamp = std::stoull(ts_str);
-                                }
-                                candle.open = std::stod(element.getValue(CCAPI_OPEN_PRICE));
-                                candle.high = std::stod(element.getValue(CCAPI_HIGH_PRICE));
-                                candle.low = std::stod(element.getValue(CCAPI_LOW_PRICE));
-                                candle.close = std::stod(element.getValue(CCAPI_CLOSE_PRICE));
-                                candle.volume = std::stod(element.getValue(CCAPI_VOLUME)); // GateIO uses Base Volume in general
+                                if (element.has(CCAPI_HTTP_BODY)) {
+                                    std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                    rapidjson::Document doc;
+                                    doc.Parse(json_str.c_str());
 
-                                candles.push_back(candle);
+                                    if (!doc.HasParseError() && doc.IsArray()) {
+                                        for (const auto& item : doc.GetArray()) {
+                                            // GateIO V4: [timestamp (s), volume (quote), close, high, low, open, ...]
+                                            // Wait, let's verify docs order vs API.
+                                            // Docs: unix_timestamp, trading_volume, close_price, high_price, low_price, open_price
+
+                                            if (item.Size() >= 6) {
+                                                Candle candle;
+                                                // 0: Time string
+                                                candle.timestamp = (int64_t)std::stoll(item[0].GetString()) * 1000;
+
+                                                // 1: Volume (Quote or Base? Docs say "Trading volume" usually base, but example suggests quote sometimes. Let's assume quote volume for now or verify).
+                                                // Actually, "trading_volume" in GateIO context is quote volume usually (USDT).
+                                                // "amount" is base volume?
+                                                // Docs V4 Spot:
+                                                // [0] Unix timestamp
+                                                // [1] Trading volume (Quote currency volume?)
+                                                // [2] Close price
+                                                // [3] High price
+                                                // [4] Low price
+                                                // [5] Open price
+
+                                                // Parse as double strings
+                                                candle.volume = std::stod(item[1].GetString());
+                                                candle.close = std::stod(item[2].GetString());
+                                                candle.high = std::stod(item[3].GetString());
+                                                candle.low = std::stod(item[4].GetString());
+                                                candle.open = std::stod(item[5].GetString());
+
+                                                candles.push_back(candle);
+                                            }
+                                        }
+                                        std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                                            return a.timestamp < b.timestamp;
+                                        });
+                                        return candles;
+                                    }
+                                }
                             }
-                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                return a.timestamp < b.timestamp;
-                            });
-                            return candles;
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
                             return candles;
                         }

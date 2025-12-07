@@ -10,7 +10,9 @@ A standardized, header-only C++ wrapper for the [Crypto-Chassis CCAPI](https://g
 ## Features
 
 *   **Unified Interface**: Access multiple exchanges (Binance, Coinbase, Kraken, OKX, etc.) through a single `nccapi::Client`.
-*   **Simplified Data Structures**: Standardized `Instrument` struct for trading pairs, supporting Spot, Futures, Options, and Swaps.
+*   **Simplified Data Structures**:
+    *   Standardized `Instrument` struct for trading pairs, supporting Spot, Futures, Options, and Swaps.
+    *   Standardized `Candle` struct for OHLCV data.
 *   **Header-Only Wrapper**: Easy integration (though dependencies must be linked).
 *   **Optimized Compilation**: Uses Pimpl and a **Unified Session** architecture to keep build times extremely low during development.
 
@@ -111,6 +113,7 @@ int main() {
             std::cout << "Fetching candles for " << symbol << "..." << std::endl;
 
             // Fetch candles: 1 minute timeframe, defaults to recent lookback
+            // Parameters: exchange, symbol, timeframe, start_time (optional), end_time (optional)
             auto candles = client.get_historical_candles(exchange_name, symbol, "1m");
 
             std::cout << "Received " << candles.size() << " candles." << std::endl;
@@ -127,4 +130,20 @@ int main() {
 
     return 0;
 }
+```
+
+### API Reference
+
+#### `get_historical_candles`
+
+Fetches historical OHLCV (Open, High, Low, Close, Volume) data.
+
+```cpp
+std::vector<Candle> get_historical_candles(
+    std::string exchange_name,
+    std::string instrument_name,
+    std::string timeframe,       // Default: "1m"
+    std::string from_date = "",  // Default: Exchange specific minimum or recent
+    std::string to_date = ""     // Default: Now
+);
 ```

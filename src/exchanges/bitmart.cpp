@@ -2,11 +2,16 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <sstream>
+#include <algorithm>
 
 #include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
+#include "ccapi_cpp/ccapi_macro.h"
+
+#include "rapidjson/document.h"
 
 namespace nccapi {
 
@@ -67,6 +72,85 @@ public:
         return instruments;
     }
 
+    std::vector<Candle> get_historical_candles(const std::string& instrument_name,
+                                               const std::string& timeframe,
+                                               int64_t from_date,
+                                               int64_t to_date) {
+        std::vector<Candle> candles;
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitmart", "", "");
+        request.appendParam({
+            {CCAPI_HTTP_PATH, "/spot/quotation/v3/klines"},
+            {CCAPI_HTTP_METHOD, "GET"}
+        });
+
+        // Bitmart API: step in minutes.
+        // 1, 3, 5, 15, 30, 45, 60, 120, 180, 240, 1440, 10080, 43200
+        int step = 60;
+        if (timeframe == "1m") step = 1;
+        else if (timeframe == "3m") step = 3;
+        else if (timeframe == "5m") step = 5;
+        else if (timeframe == "15m") step = 15;
+        else if (timeframe == "30m") step = 30;
+        else if (timeframe == "45m") step = 45;
+        else if (timeframe == "1h") step = 60;
+        else if (timeframe == "2h") step = 120;
+        else if (timeframe == "3h") step = 180;
+        else if (timeframe == "4h") step = 240;
+        else if (timeframe == "1d") step = 1440;
+        else if (timeframe == "1w") step = 10080;
+        else if (timeframe == "1M") step = 43200;
+
+        request.appendParam({
+            {"symbol", instrument_name},
+            {"step", std::to_string(step)},
+            {"before", std::to_string(to_date / 1000)},
+            {"after", std::to_string(from_date / 1000)}
+        });
+
+        session->sendRequest(request);
+
+        auto start = std::chrono::steady_clock::now();
+        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+            std::vector<ccapi::Event> events = session->getEventQueue().purge();
+            for (const auto& event : events) {
+                if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                    for (const auto& message : event.getMessageList()) {
+                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                            for (const auto& element : message.getElementList()) {
+                                std::string json_content = element.getValue(CCAPI_HTTP_BODY);
+                                rapidjson::Document doc;
+                                doc.Parse(json_content.c_str());
+
+                                if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
+                                    const auto& data = doc["data"];
+                                    for (const auto& kline : data.GetArray()) {
+                                        if (kline.IsArray() && kline.Size() >= 7) {
+                                            Candle candle;
+                                            candle.timestamp = static_cast<uint64_t>(kline[0].GetInt64()) * 1000;
+                                            candle.open = std::stod(kline[1].GetString());
+                                            candle.high = std::stod(kline[2].GetString());
+                                            candle.low = std::stod(kline[3].GetString());
+                                            candle.close = std::stod(kline[4].GetString());
+                                            candle.volume = std::stod(kline[5].GetString());
+                                            candles.push_back(candle);
+                                        }
+                                    }
+                                }
+                            }
+
+                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                                return a.timestamp < b.timestamp;
+                            });
+                            return candles;
+                        }
+                    }
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        return candles;
+    }
+
 private:
     std::shared_ptr<UnifiedSession> session;
 };
@@ -76,6 +160,13 @@ Bitmart::~Bitmart() = default;
 
 std::vector<Instrument> Bitmart::get_instruments() {
     return pimpl->get_instruments();
+}
+
+std::vector<Candle> Bitmart::get_historical_candles(const std::string& instrument_name,
+                                                     const std::string& timeframe,
+                                                     int64_t from_date,
+                                                     int64_t to_date) {
+    return pimpl->get_historical_candles(instrument_name, timeframe, from_date, to_date);
 }
 
 } // namespace nccapi

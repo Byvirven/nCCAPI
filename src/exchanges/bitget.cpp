@@ -103,7 +103,8 @@ public:
             for (const auto& event : events) {
                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
                     for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GET_RECENT_CANDLESTICKS) {
+                        if (message.getType() == ccapi::Message::Type::GET_RECENT_CANDLESTICKS ||
+                            message.getType() == ccapi::Message::Type::MARKET_DATA_EVENTS_CANDLESTICK) {
                             for (const auto& element : message.getElementList()) {
                                 Candle candle;
                                 std::string ts_str = element.getValue("TIMESTAMP");

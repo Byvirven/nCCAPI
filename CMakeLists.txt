@@ -53,3 +53,7 @@ target_link_libraries(test_structure nccapi OpenSSL::SSL OpenSSL::Crypto Threads
 # Test Historical
 add_executable(test_historical tests/test_historical.cpp)
 target_link_libraries(test_historical nccapi OpenSSL::SSL OpenSSL::Crypto Threads::Threads ZLIB::ZLIB dl)
+
+# Repro OKX
+add_executable(repro_okx src/repro_okx.cpp)
+target_link_libraries(repro_okx nccapi OpenSSL::SSL OpenSSL::Crypto Threads::Threads ZLIB::ZLIB dl)

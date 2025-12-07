@@ -7,6 +7,8 @@
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
+#include "ccapi_cpp/ccapi_macro.h"
+#include "rapidjson/document.h"
 
 namespace nccapi {
 
@@ -67,6 +69,95 @@ public:
         return instruments;
     }
 
+    std::vector<Candle> get_historical_candles(const std::string& instrument_name,
+                                               const std::string& timeframe,
+                                               int64_t from_date,
+                                               int64_t to_date) {
+        std::vector<Candle> candles;
+
+        // Use GENERIC_PUBLIC_REQUEST for WhiteBIT
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "whitebit", "", "GET_KLINE");
+
+        // WhiteBIT timeframe: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M
+        std::string interval = "1m";
+        if (timeframe == "1m") interval = "1m";
+        else if (timeframe == "3m") interval = "3m";
+        else if (timeframe == "5m") interval = "5m";
+        else if (timeframe == "15m") interval = "15m";
+        else if (timeframe == "30m") interval = "30m";
+        else if (timeframe == "1h") interval = "1h";
+        else if (timeframe == "2h") interval = "2h";
+        else if (timeframe == "4h") interval = "4h";
+        else if (timeframe == "6h") interval = "6h";
+        else if (timeframe == "8h") interval = "8h";
+        else if (timeframe == "12h") interval = "12h";
+        else if (timeframe == "1d") interval = "1d";
+        else if (timeframe == "3d") interval = "3d";
+        else if (timeframe == "1w") interval = "1w";
+        else if (timeframe == "1M") interval = "1M";
+        else interval = "1m";
+
+        request.appendParam({
+            {CCAPI_HTTP_PATH, "/api/v1/public/kline"},
+            {CCAPI_HTTP_METHOD, "GET"},
+            {"market", instrument_name},
+            {"interval", interval},
+            {"start", std::to_string(from_date / 1000)}, // Seconds
+            {"end", std::to_string(to_date / 1000)},
+            {"limit", "1000"}
+        });
+
+        session->sendRequest(request);
+
+        auto start = std::chrono::steady_clock::now();
+        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+            std::vector<ccapi::Event> events = session->getEventQueue().purge();
+            for (const auto& event : events) {
+                if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                    for (const auto& message : event.getMessageList()) {
+                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                            for (const auto& element : message.getElementList()) {
+                                if (element.has(CCAPI_HTTP_BODY)) {
+                                    std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                    rapidjson::Document doc;
+                                    doc.Parse(json_str.c_str());
+
+                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("result")) {
+                                        const auto& result = doc["result"];
+                                        if (result.IsArray()) {
+                                            for (const auto& item : result.GetArray()) {
+                                                // [time, open, close, high, low, volume]
+                                                if (item.IsArray() && item.Size() >= 6) {
+                                                    Candle candle;
+                                                    candle.timestamp = (int64_t)item[0].GetInt64() * 1000;
+                                                    candle.open = std::stod(item[1].GetString());
+                                                    candle.close = std::stod(item[2].GetString());
+                                                    candle.high = std::stod(item[3].GetString());
+                                                    candle.low = std::stod(item[4].GetString());
+                                                    candle.volume = std::stod(item[5].GetString());
+
+                                                    candles.push_back(candle);
+                                                }
+                                            }
+                                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                                                return a.timestamp < b.timestamp;
+                                            });
+                                            return candles;
+                                        }
+                                    }
+                                }
+                            }
+                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                            return candles;
+                        }
+                    }
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        return candles;
+    }
+
 private:
     std::shared_ptr<UnifiedSession> session;
 };
@@ -76,6 +167,13 @@ Whitebit::~Whitebit() = default;
 
 std::vector<Instrument> Whitebit::get_instruments() {
     return pimpl->get_instruments();
+}
+
+std::vector<Candle> Whitebit::get_historical_candles(const std::string& instrument_name,
+                                                     const std::string& timeframe,
+                                                     int64_t from_date,
+                                                     int64_t to_date) {
+    return pimpl->get_historical_candles(instrument_name, timeframe, from_date, to_date);
 }
 
 } // namespace nccapi

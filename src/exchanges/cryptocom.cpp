@@ -2,11 +2,15 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 #include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
+#include "ccapi_cpp/ccapi_macro.h"
+
+#include "rapidjson/document.h"
 
 namespace nccapi {
 
@@ -67,6 +71,88 @@ public:
         return instruments;
     }
 
+    std::vector<Candle> get_historical_candles(const std::string& instrument_name,
+                                               const std::string& timeframe,
+                                               int64_t from_date,
+                                               int64_t to_date) {
+        std::vector<Candle> candles;
+
+        // Crypto.com Generic Request
+        // Endpoint: /v2/public/get-candlestick
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "cryptocom", "", "");
+        request.appendParam({
+            {CCAPI_HTTP_PATH, "/v2/public/get-candlestick"},
+            {CCAPI_HTTP_METHOD, "GET"}
+        });
+
+        // Timeframe: 1m, 5m, 15m, 30m, 1h, 4h, 6h, 12h, 1D, 7D, 14D, 1M
+        std::string tf = "1m";
+        if (timeframe == "1m") tf = "1m";
+        else if (timeframe == "5m") tf = "5m";
+        else if (timeframe == "15m") tf = "15m";
+        else if (timeframe == "30m") tf = "30m";
+        else if (timeframe == "1h") tf = "1h";
+        else if (timeframe == "4h") tf = "4h";
+        else if (timeframe == "6h") tf = "6h";
+        else if (timeframe == "12h") tf = "12h";
+        else if (timeframe == "1d") tf = "1D";
+        else if (timeframe == "1w") tf = "7D";
+        else if (timeframe == "1M") tf = "1M";
+        else tf = "1m";
+
+        request.appendParam({
+            {"instrument_name", instrument_name},
+            {"timeframe", tf}
+        });
+
+        session->sendRequest(request);
+
+        auto start = std::chrono::steady_clock::now();
+        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+            std::vector<ccapi::Event> events = session->getEventQueue().purge();
+            for (const auto& event : events) {
+                if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                    for (const auto& message : event.getMessageList()) {
+                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                            for (const auto& element : message.getElementList()) {
+                                std::string json_content = element.getValue(CCAPI_HTTP_BODY);
+                                rapidjson::Document doc;
+                                doc.Parse(json_content.c_str());
+
+                                if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("result") && doc["result"].IsObject()) {
+                                    const auto& result = doc["result"];
+                                    if (result.HasMember("data") && result["data"].IsArray()) {
+                                        for (const auto& kline : result["data"].GetArray()) {
+                                            if (kline.IsObject()) {
+                                                Candle candle;
+                                                // {"t": 1600000000000, "o": ..., "h": ..., "l": ..., "c": ..., "v": ...}
+                                                if (kline.HasMember("t") && kline["t"].IsInt64()) candle.timestamp = kline["t"].GetInt64();
+                                                if (kline.HasMember("o") && kline["o"].IsNumber()) candle.open = kline["o"].GetDouble();
+                                                if (kline.HasMember("h") && kline["h"].IsNumber()) candle.high = kline["h"].GetDouble();
+                                                if (kline.HasMember("l") && kline["l"].IsNumber()) candle.low = kline["l"].GetDouble();
+                                                if (kline.HasMember("c") && kline["c"].IsNumber()) candle.close = kline["c"].GetDouble();
+                                                if (kline.HasMember("v") && kline["v"].IsNumber()) candle.volume = kline["v"].GetDouble();
+
+                                                candles.push_back(candle);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                                return a.timestamp < b.timestamp;
+                            });
+                            return candles;
+                        }
+                    }
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        return candles;
+    }
+
 private:
     std::shared_ptr<UnifiedSession> session;
 };
@@ -76,6 +162,13 @@ Cryptocom::~Cryptocom() = default;
 
 std::vector<Instrument> Cryptocom::get_instruments() {
     return pimpl->get_instruments();
+}
+
+std::vector<Candle> Cryptocom::get_historical_candles(const std::string& instrument_name,
+                                                     const std::string& timeframe,
+                                                     int64_t from_date,
+                                                     int64_t to_date) {
+    return pimpl->get_historical_candles(instrument_name, timeframe, from_date, to_date);
 }
 
 } // namespace nccapi

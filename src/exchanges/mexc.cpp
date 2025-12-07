@@ -7,6 +7,8 @@
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
+#include "ccapi_cpp/ccapi_macro.h"
+#include "rapidjson/document.h"
 
 namespace nccapi {
 
@@ -72,24 +74,29 @@ public:
                                                int64_t from_date,
                                                int64_t to_date) {
         std::vector<Candle> candles;
-        ccapi::Request request(ccapi::Request::Operation::GET_RECENT_CANDLESTICKS, "mexc", instrument_name);
+
+        // Use GENERIC_PUBLIC_REQUEST for MEXC
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "mexc", "", "GET_KLINES");
 
         // Mexc intervals: 1m, 5m, 15m, 30m, 60m, 4h, 1d, 1M
-        int interval_seconds = 60;
-        if (timeframe == "1m") interval_seconds = 60;
-        else if (timeframe == "5m") interval_seconds = 300;
-        else if (timeframe == "15m") interval_seconds = 900;
-        else if (timeframe == "30m") interval_seconds = 1800;
-        else if (timeframe == "1h") interval_seconds = 3600;
-        else if (timeframe == "4h") interval_seconds = 14400;
-        else if (timeframe == "1d") interval_seconds = 86400;
-        else if (timeframe == "1M") interval_seconds = 2592000;
-        else interval_seconds = 60;
+        std::string interval = "1m";
+        if (timeframe == "1m") interval = "1m";
+        else if (timeframe == "5m") interval = "5m";
+        else if (timeframe == "15m") interval = "15m";
+        else if (timeframe == "30m") interval = "30m";
+        else if (timeframe == "1h") interval = "60m";
+        else if (timeframe == "4h") interval = "4h";
+        else if (timeframe == "1d") interval = "1d";
+        else if (timeframe == "1M") interval = "1M";
+        else interval = "1m";
 
         request.appendParam({
-            {CCAPI_CANDLESTICK_INTERVAL_SECONDS, std::to_string(interval_seconds)},
-            {CCAPI_START_TIME_SECONDS, std::to_string(from_date / 1000)},
-            {CCAPI_END_TIME_SECONDS, std::to_string(to_date / 1000)},
+            {CCAPI_HTTP_PATH, "/api/v3/klines"},
+            {CCAPI_HTTP_METHOD, "GET"},
+            {"symbol", instrument_name},
+            {"interval", interval},
+            {"startTime", std::to_string(from_date)}, // ms
+            {"endTime", std::to_string(to_date)},
             {"limit", "1000"}
         });
 
@@ -101,25 +108,43 @@ public:
             for (const auto& event : events) {
                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
                     for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GET_RECENT_CANDLESTICKS) {
+                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
                             for (const auto& element : message.getElementList()) {
-                                Candle candle;
-                                std::string ts_str = element.getValue("TIMESTAMP");
-                                if (!ts_str.empty()) {
-                                    candle.timestamp = std::stoull(ts_str);
-                                }
-                                candle.open = std::stod(element.getValue(CCAPI_OPEN_PRICE));
-                                candle.high = std::stod(element.getValue(CCAPI_HIGH_PRICE));
-                                candle.low = std::stod(element.getValue(CCAPI_LOW_PRICE));
-                                candle.close = std::stod(element.getValue(CCAPI_CLOSE_PRICE));
-                                candle.volume = std::stod(element.getValue(CCAPI_VOLUME));
+                                if (element.has(CCAPI_HTTP_BODY)) {
+                                    std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                    rapidjson::Document doc;
+                                    doc.Parse(json_str.c_str());
 
-                                candles.push_back(candle);
+                                    if (!doc.HasParseError() && doc.IsArray()) {
+                                        for (const auto& item : doc.GetArray()) {
+                                            // [1660124280000, "24250", "24250.01", "24244.66", "24245.01", "3.08", "74697.518", "1660124339999"]
+                                            if (item.IsArray() && item.Size() >= 6) {
+                                                Candle candle;
+                                                if (item[0].IsInt64()) candle.timestamp = item[0].GetInt64();
+                                                else if (item[0].IsString()) candle.timestamp = std::stoll(item[0].GetString());
+
+                                                auto getVal = [](const rapidjson::Value& v) -> double {
+                                                    if (v.IsString()) return std::stod(v.GetString());
+                                                    if (v.IsDouble()) return v.GetDouble();
+                                                    return 0.0;
+                                                };
+
+                                                candle.open = getVal(item[1]);
+                                                candle.high = getVal(item[2]);
+                                                candle.low = getVal(item[3]);
+                                                candle.close = getVal(item[4]);
+                                                candle.volume = getVal(item[5]);
+
+                                                candles.push_back(candle);
+                                            }
+                                        }
+                                        std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                                            return a.timestamp < b.timestamp;
+                                        });
+                                        return candles;
+                                    }
+                                }
                             }
-                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                return a.timestamp < b.timestamp;
-                            });
-                            return candles;
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
                             return candles;
                         }
