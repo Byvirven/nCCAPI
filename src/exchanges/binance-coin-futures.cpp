@@ -2,6 +2,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 #include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
@@ -39,9 +40,12 @@ public:
                                 std::string qty_inc = element.getValue(CCAPI_ORDER_QUANTITY_INCREMENT);
                                 if (!qty_inc.empty()) { try { instrument.step_size = std::stod(qty_inc); } catch(...) {} }
 
-                                if (element.has(CCAPI_CONTRACT_SIZE)) {
-                                    std::string val = element.getValue(CCAPI_CONTRACT_SIZE);
-                                    if(!val.empty()) { try { instrument.contract_size = std::stod(val); } catch(...) {} }
+                                std::string qty_min = element.getValue(CCAPI_ORDER_QUANTITY_MIN);
+                                if (!qty_min.empty()) { try { instrument.min_size = std::stod(qty_min); } catch(...) {} }
+
+                                if(element.has(CCAPI_CONTRACT_SIZE)) {
+                                     std::string val = element.getValue(CCAPI_CONTRACT_SIZE);
+                                     if(!val.empty()) { try { instrument.contract_size = std::stod(val); } catch(...) {} }
                                 }
 
                                 if (!instrument.base.empty() && !instrument.quote.empty()) {
@@ -49,9 +53,7 @@ public:
                                 } else {
                                     instrument.symbol = instrument.id;
                                 }
-                                instrument.type = "future"; // Default
-
-                                // Check contractType or similar if needed for perpetual (swap) vs future
+                                instrument.type = "future"; // COIN-M Futures
 
                                 if (element.has(CCAPI_INSTRUMENT_STATUS)) {
                                     instrument.active = (element.getValue(CCAPI_INSTRUMENT_STATUS) == "TRADING");
@@ -80,13 +82,14 @@ public:
                                                int64_t from_date,
                                                int64_t to_date) {
         std::vector<Candle> candles;
-        ccapi::Request request(ccapi::Request::Operation::GET_RECENT_CANDLESTICKS, "binance-coin-futures", instrument_name);
+        // Binance Coin Futures uses GET_HISTORICAL_CANDLESTICKS -> /dapi/v1/klines
+        ccapi::Request request(ccapi::Request::Operation::GET_HISTORICAL_CANDLESTICKS, "binance-coin-futures", instrument_name);
 
         request.appendParam({
             {CCAPI_CANDLESTICK_INTERVAL_SECONDS, std::to_string(timeframeToSeconds(timeframe))},
             {CCAPI_START_TIME_SECONDS, std::to_string(from_date / 1000)},
             {CCAPI_END_TIME_SECONDS, std::to_string(to_date / 1000)},
-            {"limit", "1000"}
+            {CCAPI_LIMIT, "1000"}
         });
 
         session->sendRequest(request);
@@ -97,13 +100,13 @@ public:
             for (const auto& event : events) {
                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
                     for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GET_RECENT_CANDLESTICKS) {
+                        if (message.getType() == ccapi::Message::Type::GET_HISTORICAL_CANDLESTICKS ||
+                            message.getType() == ccapi::Message::Type::MARKET_DATA_EVENTS_CANDLESTICK) {
                             for (const auto& element : message.getElementList()) {
                                 Candle candle;
-                                std::string ts_str = element.getValue("TIMESTAMP");
-                                if (!ts_str.empty()) {
-                                    candle.timestamp = std::stoull(ts_str);
-                                }
+                                candle.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    message.getTime().time_since_epoch()).count();
+
                                 candle.open = std::stod(element.getValue(CCAPI_OPEN_PRICE));
                                 candle.high = std::stod(element.getValue(CCAPI_HIGH_PRICE));
                                 candle.low = std::stod(element.getValue(CCAPI_LOW_PRICE));
@@ -112,15 +115,17 @@ public:
 
                                 candles.push_back(candle);
                             }
-                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                return a.timestamp < b.timestamp;
-                            });
-                            return candles;
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
                             return candles;
                         }
                     }
                 }
+            }
+            if (!candles.empty()) {
+                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                    return a.timestamp < b.timestamp;
+                });
+                return candles;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }

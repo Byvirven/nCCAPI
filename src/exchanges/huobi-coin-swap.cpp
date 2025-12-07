@@ -103,7 +103,7 @@ public:
         request.appendParam({
             {"contract_code", instrument_name},
             {"period", period},
-            {"size", "200"} // Default recent
+            {"size", "2000"}
         });
 
         session->sendRequest(request);
@@ -129,7 +129,7 @@ public:
                                             if (kline.HasMember("high") && kline["high"].IsNumber()) candle.high = kline["high"].GetDouble();
                                             if (kline.HasMember("low") && kline["low"].IsNumber()) candle.low = kline["low"].GetDouble();
                                             if (kline.HasMember("close") && kline["close"].IsNumber()) candle.close = kline["close"].GetDouble();
-                                            if (kline.HasMember("vol") && kline["vol"].IsNumber()) candle.volume = kline["vol"].GetDouble(); // vol or amount? usually vol in contracts
+                                            if (kline.HasMember("vol") && kline["vol"].IsNumber()) candle.volume = kline["vol"].GetDouble();
 
                                             candles.push_back(candle);
                                         }

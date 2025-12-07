@@ -2,14 +2,13 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 #include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
-#include "ccapi_cpp/ccapi_macro.h"
 
-// RapidJSON for manual parsing
 #include "rapidjson/document.h"
 
 namespace nccapi {
@@ -20,9 +19,7 @@ public:
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
-
-        // Use GENERIC_PUBLIC_REQUEST to avoid CCAPI adding ?showPermissionSets=false (Error -1104)
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "binance-us", "", "GET_INSTRUMENTS");
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "binance-us", "", "");
         request.appendParam({
             {CCAPI_HTTP_PATH, "/api/v3/exchangeInfo"},
             {CCAPI_HTTP_METHOD, "GET"}
@@ -43,44 +40,44 @@ public:
                                     rapidjson::Document doc;
                                     doc.Parse(json_str.c_str());
 
-                                    if (!doc.HasParseError() && doc.HasMember("symbols") && doc["symbols"].IsArray()) {
-                                        for (const auto& s : doc["symbols"].GetArray()) {
-                                            Instrument instrument;
-                                            instrument.id = s["symbol"].GetString();
-                                            instrument.base = s["baseAsset"].GetString();
-                                            instrument.quote = s["quoteAsset"].GetString();
+                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("symbols")) {
+                                        const auto& symbols = doc["symbols"];
+                                        if (symbols.IsArray()) {
+                                            for (const auto& s : symbols.GetArray()) {
+                                                Instrument instrument;
+                                                instrument.id = s["symbol"].GetString();
+                                                instrument.base = s["baseAsset"].GetString();
+                                                instrument.quote = s["quoteAsset"].GetString();
 
-                                            // Status
-                                            if (s.HasMember("status")) {
-                                                instrument.active = (std::string(s["status"].GetString()) == "TRADING");
-                                            }
-
-                                            // Filters
-                                            if (s.HasMember("filters") && s["filters"].IsArray()) {
-                                                for (const auto& f : s["filters"].GetArray()) {
-                                                    if (f.HasMember("filterType")) {
-                                                        std::string type = f["filterType"].GetString();
-                                                        if (type == "PRICE_FILTER") {
-                                                            if (f.HasMember("tickSize")) instrument.tick_size = std::stod(f["tickSize"].GetString());
-                                                        } else if (type == "LOT_SIZE") {
-                                                            if (f.HasMember("stepSize")) instrument.step_size = std::stod(f["stepSize"].GetString());
-                                                            if (f.HasMember("minQty")) instrument.min_size = std::stod(f["minQty"].GetString());
-                                                        } else if (type == "NOTIONAL") {
-                                                            if (f.HasMember("minNotional")) instrument.min_notional = std::stod(f["minNotional"].GetString());
+                                                if (s.HasMember("filters") && s["filters"].IsArray()) {
+                                                    for (const auto& f : s["filters"].GetArray()) {
+                                                        std::string filterType = f["filterType"].GetString();
+                                                        if (filterType == "PRICE_FILTER") {
+                                                            instrument.tick_size = std::stod(f["tickSize"].GetString());
+                                                        } else if (filterType == "LOT_SIZE") {
+                                                            instrument.step_size = std::stod(f["stepSize"].GetString());
+                                                            instrument.min_size = std::stod(f["minQty"].GetString());
+                                                        } else if (filterType == "NOTIONAL") {
+                                                            instrument.min_notional = std::stod(f["minNotional"].GetString());
                                                         }
                                                     }
                                                 }
-                                            }
 
-                                            if (!instrument.base.empty() && !instrument.quote.empty()) {
-                                                instrument.symbol = instrument.base + "/" + instrument.quote;
-                                            } else {
-                                                instrument.symbol = instrument.id;
+                                                if (!instrument.base.empty() && !instrument.quote.empty()) {
+                                                    instrument.symbol = instrument.base + "/" + instrument.quote;
+                                                } else {
+                                                    instrument.symbol = instrument.id;
+                                                }
+                                                instrument.type = "spot";
+
+                                                if (s.HasMember("status")) {
+                                                    instrument.active = (std::string(s["status"].GetString()) == "TRADING");
+                                                }
+
+                                                instruments.push_back(instrument);
                                             }
-                                            instrument.type = "spot";
-                                            instruments.push_back(instrument);
+                                            return instruments;
                                         }
-                                        return instruments;
                                     }
                                 }
                             }
@@ -100,18 +97,14 @@ public:
                                                int64_t from_date,
                                                int64_t to_date) {
         std::vector<Candle> candles;
-
-        // Use GENERIC_PUBLIC_REQUEST for BinanceUS to ensure reliable execution
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "binance-us", "", "GET_KLINES");
+        // Binance US uses GET_HISTORICAL_CANDLESTICKS -> /api/v3/klines
+        ccapi::Request request(ccapi::Request::Operation::GET_HISTORICAL_CANDLESTICKS, "binance-us", instrument_name);
 
         request.appendParam({
-            {CCAPI_HTTP_PATH, "/api/v3/klines"},
-            {CCAPI_HTTP_METHOD, "GET"},
-            {"symbol", instrument_name},
-            {"interval", timeframe}, // Binance uses "1m", "1h" directly
-            {"startTime", std::to_string(from_date)}, // Binance uses ms
-            {"endTime", std::to_string(to_date)},
-            {"limit", "1000"}
+            {CCAPI_CANDLESTICK_INTERVAL_SECONDS, std::to_string(timeframeToSeconds(timeframe))},
+            {CCAPI_START_TIME_SECONDS, std::to_string(from_date / 1000)},
+            {CCAPI_END_TIME_SECONDS, std::to_string(to_date / 1000)},
+            {CCAPI_LIMIT, "1000"}
         });
 
         session->sendRequest(request);
@@ -122,38 +115,32 @@ public:
             for (const auto& event : events) {
                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
                     for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                        if (message.getType() == ccapi::Message::Type::GET_HISTORICAL_CANDLESTICKS ||
+                            message.getType() == ccapi::Message::Type::MARKET_DATA_EVENTS_CANDLESTICK) {
                             for (const auto& element : message.getElementList()) {
-                                if (element.has(CCAPI_HTTP_BODY)) {
-                                    std::string json_str = element.getValue(CCAPI_HTTP_BODY);
-                                    rapidjson::Document doc;
-                                    doc.Parse(json_str.c_str());
+                                Candle candle;
+                                candle.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    message.getTime().time_since_epoch()).count();
 
-                                    if (!doc.HasParseError() && doc.IsArray()) {
-                                        for (const auto& item : doc.GetArray()) {
-                                            if (item.IsArray() && item.Size() >= 6) {
-                                                Candle candle;
-                                                candle.timestamp = item[0].GetInt64();
-                                                candle.open = std::stod(item[1].GetString());
-                                                candle.high = std::stod(item[2].GetString());
-                                                candle.low = std::stod(item[3].GetString());
-                                                candle.close = std::stod(item[4].GetString());
-                                                candle.volume = std::stod(item[5].GetString());
-                                                candles.push_back(candle);
-                                            }
-                                        }
-                                        std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                            return a.timestamp < b.timestamp;
-                                        });
-                                        return candles;
-                                    }
-                                }
+                                candle.open = std::stod(element.getValue(CCAPI_OPEN_PRICE));
+                                candle.high = std::stod(element.getValue(CCAPI_HIGH_PRICE));
+                                candle.low = std::stod(element.getValue(CCAPI_LOW_PRICE));
+                                candle.close = std::stod(element.getValue(CCAPI_CLOSE_PRICE));
+                                candle.volume = std::stod(element.getValue(CCAPI_VOLUME));
+
+                                candles.push_back(candle);
                             }
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
                             return candles;
                         }
                     }
                 }
+            }
+            if (!candles.empty()) {
+                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                    return a.timestamp < b.timestamp;
+                });
+                return candles;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }

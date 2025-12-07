@@ -2,6 +2,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 #include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
@@ -66,7 +67,6 @@ public:
                             }
                             return instruments;
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                             // Log error if needed, or return empty
                              return instruments;
                         }
                     }
@@ -82,14 +82,13 @@ public:
                                                int64_t from_date,
                                                int64_t to_date) {
         std::vector<Candle> candles;
-        // Binance Global uses GET_RECENT_CANDLESTICKS -> /api/v3/klines
-        ccapi::Request request(ccapi::Request::Operation::GET_RECENT_CANDLESTICKS, "binance", instrument_name);
+        ccapi::Request request(ccapi::Request::Operation::GET_HISTORICAL_CANDLESTICKS, "binance", instrument_name);
 
         request.appendParam({
             {CCAPI_CANDLESTICK_INTERVAL_SECONDS, std::to_string(timeframeToSeconds(timeframe))},
             {CCAPI_START_TIME_SECONDS, std::to_string(from_date / 1000)},
             {CCAPI_END_TIME_SECONDS, std::to_string(to_date / 1000)},
-            {"limit", "1000"}
+            {CCAPI_LIMIT, "1000"}
         });
 
         session->sendRequest(request);
@@ -100,13 +99,13 @@ public:
             for (const auto& event : events) {
                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
                     for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GET_RECENT_CANDLESTICKS) {
+                        if (message.getType() == ccapi::Message::Type::GET_HISTORICAL_CANDLESTICKS ||
+                            message.getType() == ccapi::Message::Type::MARKET_DATA_EVENTS_CANDLESTICK) {
                             for (const auto& element : message.getElementList()) {
                                 Candle candle;
-                                std::string ts_str = element.getValue("TIMESTAMP");
-                                if (!ts_str.empty()) {
-                                    candle.timestamp = std::stoull(ts_str);
-                                }
+                                candle.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    message.getTime().time_since_epoch()).count();
+
                                 candle.open = std::stod(element.getValue(CCAPI_OPEN_PRICE));
                                 candle.high = std::stod(element.getValue(CCAPI_HIGH_PRICE));
                                 candle.low = std::stod(element.getValue(CCAPI_LOW_PRICE));
@@ -115,15 +114,17 @@ public:
 
                                 candles.push_back(candle);
                             }
-                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                return a.timestamp < b.timestamp;
-                            });
-                            return candles;
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
                             return candles;
                         }
                     }
                 }
+            }
+            if (!candles.empty()) {
+                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                    return a.timestamp < b.timestamp;
+                });
+                return candles;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }

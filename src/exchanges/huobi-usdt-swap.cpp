@@ -103,7 +103,7 @@ public:
         request.appendParam({
             {"contract_code", instrument_name},
             {"period", period},
-            {"size", "200"} // Default recent
+            {"size", "2000"}
         });
 
         session->sendRequest(request);

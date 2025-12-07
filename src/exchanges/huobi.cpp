@@ -2,6 +2,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 #include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
@@ -49,7 +50,6 @@ public:
                                 } else {
                                     instrument.symbol = instrument.id;
                                 }
-                                // Huobi 'huobi' is spot
                                 instrument.type = "spot";
 
                                 for (const auto& pair : element.getNameValueMap()) {
@@ -76,8 +76,13 @@ public:
                                                int64_t to_date) {
         std::vector<Candle> candles;
 
-        // Use GENERIC_PUBLIC_REQUEST for Huobi
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "huobi", "", "GET_KLINE");
+        // Huobi Spot Generic Request
+        // Endpoint: /market/history/kline
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "huobi", "", "");
+        request.appendParam({
+            {CCAPI_HTTP_PATH, "/market/history/kline"},
+            {CCAPI_HTTP_METHOD, "GET"}
+        });
 
         // Huobi period: 1min, 5min, 15min, 30min, 60min, 4hour, 1day, 1mon, 1week, 1year
         std::string period = "1min";
@@ -93,8 +98,6 @@ public:
         else period = "1min";
 
         request.appendParam({
-            {CCAPI_HTTP_PATH, "/market/history/kline"},
-            {CCAPI_HTTP_METHOD, "GET"},
             {"symbol", instrument_name},
             {"period", period},
             {"size", "2000"}
@@ -117,7 +120,6 @@ public:
 
                                     if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
                                         for (const auto& item : doc["data"].GetArray()) {
-                                            // {"id": 1539882428, "amount": 123.1, "count": 1, "open": 0.021, "close": 0.021, "low": 0.021, "high": 0.021, "vol": 123.1}
                                             if (item.IsObject()) {
                                                 Candle candle;
                                                 if (item.HasMember("id")) {
