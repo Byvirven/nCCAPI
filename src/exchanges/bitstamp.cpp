@@ -2,6 +2,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 #include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
@@ -41,7 +42,7 @@ public:
                                 std::string qty_inc = element.getValue(CCAPI_ORDER_QUANTITY_INCREMENT);
                                 if (!qty_inc.empty()) { try { instrument.step_size = std::stod(qty_inc); } catch(...) {} }
 
-                                std::string qty_min = element.getValue(CCAPI_ORDER_QUANTITY_MIN); // Check if available
+                                std::string qty_min = element.getValue(CCAPI_ORDER_QUANTITY_MIN);
                                 if (!qty_min.empty()) { try { instrument.min_size = std::stod(qty_min); } catch(...) {} }
 
                                 if (!instrument.base.empty() && !instrument.quote.empty()) {
@@ -75,35 +76,32 @@ public:
                                                int64_t to_date) {
         std::vector<Candle> candles;
 
-        // Use GENERIC_PUBLIC_REQUEST for Bitstamp
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitstamp", "", "GET_OHLC");
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitstamp", "", "");
 
-        // Bitstamp: step in seconds
-        int interval_seconds = 60;
-        if (timeframe == "1m") interval_seconds = 60;
-        else if (timeframe == "3m") interval_seconds = 180;
-        else if (timeframe == "5m") interval_seconds = 300;
-        else if (timeframe == "15m") interval_seconds = 900;
-        else if (timeframe == "30m") interval_seconds = 1800;
-        else if (timeframe == "1h") interval_seconds = 3600;
-        else if (timeframe == "2h") interval_seconds = 7200;
-        else if (timeframe == "4h") interval_seconds = 14400;
-        else if (timeframe == "6h") interval_seconds = 21600;
-        else if (timeframe == "12h") interval_seconds = 43200;
-        else if (timeframe == "1d") interval_seconds = 86400;
-        else if (timeframe == "3d") interval_seconds = 259200;
-        else interval_seconds = 60;
+        // Bitstamp step (seconds): 60, 180, 300, 900, 1800, 3600, 7200, 14400, 21600, 43200, 86400, 259200
+        std::string step = "60";
+        if (timeframe == "1m") step = "60";
+        else if (timeframe == "5m") step = "300";
+        else if (timeframe == "15m") step = "900";
+        else if (timeframe == "30m") step = "1800";
+        else if (timeframe == "1h") step = "3600";
+        else if (timeframe == "2h") step = "7200";
+        else if (timeframe == "4h") step = "14400";
+        else if (timeframe == "6h") step = "21600";
+        else if (timeframe == "12h") step = "43200";
+        else if (timeframe == "1d") step = "86400";
+        else if (timeframe == "3d") step = "259200";
+        else step = "60";
 
-        // Path: /api/v2/ohlc/{pair}/
         std::string path = "/api/v2/ohlc/" + instrument_name + "/";
 
         request.appendParam({
             {CCAPI_HTTP_PATH, path},
             {CCAPI_HTTP_METHOD, "GET"},
-            {"step", std::to_string(interval_seconds)},
-            {"start", std::to_string(from_date / 1000)},
-            {"end", std::to_string(to_date / 1000)},
-            {"limit", "1000"}
+            {"step", step},
+            {"limit", "1000"},
+            {"start", std::to_string(from_date / 1000)}, // seconds
+            {"end", std::to_string(to_date / 1000)}
         });
 
         session->sendRequest(request);
@@ -121,16 +119,14 @@ public:
                                     rapidjson::Document doc;
                                     doc.Parse(json_str.c_str());
 
-                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].HasMember("ohlc")) {
-                                        const auto& ohlc = doc["data"]["ohlc"];
-                                        if (ohlc.IsArray()) {
-                                            for (const auto& item : ohlc.GetArray()) {
+                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data")) {
+                                        const auto& data = doc["data"];
+                                        if (data.IsObject() && data.HasMember("ohlc") && data["ohlc"].IsArray()) {
+                                            for (const auto& item : data["ohlc"].GetArray()) {
                                                 // {"high": "...", "timestamp": "...", "volume": "...", "low": "...", "close": "...", "open": "..."}
                                                 if (item.IsObject()) {
                                                     Candle candle;
-                                                    if (item.HasMember("timestamp")) {
-                                                        candle.timestamp = (int64_t)std::stoll(item["timestamp"].GetString()) * 1000;
-                                                    }
+                                                    if (item.HasMember("timestamp")) candle.timestamp = std::stoll(item["timestamp"].GetString()) * 1000;
                                                     if (item.HasMember("open")) candle.open = std::stod(item["open"].GetString());
                                                     if (item.HasMember("high")) candle.high = std::stod(item["high"].GetString());
                                                     if (item.HasMember("low")) candle.low = std::stod(item["low"].GetString());
@@ -140,10 +136,6 @@ public:
                                                     candles.push_back(candle);
                                                 }
                                             }
-                                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                                return a.timestamp < b.timestamp;
-                                            });
-                                            return candles;
                                         }
                                     }
                                 }
@@ -153,6 +145,12 @@ public:
                         }
                     }
                 }
+            }
+            if (!candles.empty()) {
+                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                    return a.timestamp < b.timestamp;
+                });
+                return candles;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }

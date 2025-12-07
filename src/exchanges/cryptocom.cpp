@@ -9,7 +9,6 @@
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
 #include "ccapi_cpp/ccapi_macro.h"
-
 #include "rapidjson/document.h"
 
 namespace nccapi {
@@ -105,6 +104,16 @@ public:
             {"timeframe", tf}
         });
 
+        // Note: Crypto.com v2 public API get-candlestick returns max 300? No pagination params?
+        // Actually it seems it does not support pagination officially in public endpoint documentation.
+        // It just returns latest.
+        // If from_date is used, we can't pass it?
+        // Some docs mention 'start_time' and 'end_time' but maybe exchange specific or private?
+        // Trying 'start_ts' / 'end_ts'?
+        // Docs say no params for time.
+        // So we get what we get (latest 300).
+        // Sorting and filtering will happen below.
+
         session->sendRequest(request);
 
         auto start = std::chrono::steady_clock::now();
@@ -139,14 +148,24 @@ public:
                                     }
                                 }
                             }
-
-                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                return a.timestamp < b.timestamp;
-                            });
+                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
                             return candles;
                         }
                     }
                 }
+            }
+            if (!candles.empty()) {
+                if (from_date > 0 || to_date > 0) {
+                    candles.erase(std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
+                        if (from_date > 0 && c.timestamp < from_date) return true;
+                        if (to_date > 0 && c.timestamp > to_date) return true;
+                        return false;
+                    }), candles.end());
+                }
+                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                    return a.timestamp < b.timestamp;
+                });
+                return candles;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
