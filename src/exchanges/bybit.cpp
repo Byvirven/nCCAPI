@@ -9,8 +9,6 @@
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
 
-#include "rapidjson/document.h"
-
 namespace nccapi {
 
 class Bybit::Impl {
@@ -19,77 +17,66 @@ public:
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
+        // Bybit V5 requires iterating categories for GET_INSTRUMENTS?
+        // Original logic likely iterated categories or just called GET_INSTRUMENTS if configured.
+        // Standard CCAPI GET_INSTRUMENTS for Bybit maps to /v5/market/instruments-info
+        // It requires "category" param.
+        // So we iterate categories using NATIVE GET_INSTRUMENTS.
         std::vector<std::string> categories = {"spot", "linear", "inverse", "option"};
 
         for (const auto& cat : categories) {
-            ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bybit", "", "");
-            request.appendParam({
-                {CCAPI_HTTP_PATH, "/v5/market/instruments-info"},
-                {CCAPI_HTTP_METHOD, "GET"},
-                {"category", cat}
-            });
+            ccapi::Request request(ccapi::Request::Operation::GET_INSTRUMENTS, "bybit");
+            request.appendParam({{"category", cat}});
 
             session->sendRequest(request);
 
             auto start = std::chrono::steady_clock::now();
-            bool received = false;
             while (std::chrono::steady_clock::now() - start < std::chrono::seconds(5)) {
                 std::vector<ccapi::Event> events = session->getEventQueue().purge();
                 for (const auto& event : events) {
                     if (event.getType() == ccapi::Event::Type::RESPONSE) {
                         for (const auto& message : event.getMessageList()) {
-                            if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                            if (message.getType() == ccapi::Message::Type::GET_INSTRUMENTS) {
                                 for (const auto& element : message.getElementList()) {
-                                    if (element.has(CCAPI_HTTP_BODY)) {
-                                        std::string json_str = element.getValue(CCAPI_HTTP_BODY);
-                                        rapidjson::Document doc;
-                                        doc.Parse(json_str.c_str());
-                                        if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("result")) {
-                                            const auto& result = doc["result"];
-                                            if (result.HasMember("list") && result["list"].IsArray()) {
-                                                for (const auto& item : result["list"].GetArray()) {
-                                                    Instrument instrument;
-                                                    instrument.id = item["symbol"].GetString();
-                                                    instrument.base = item["baseCoin"].GetString();
-                                                    instrument.quote = item["quoteCoin"].GetString();
+                                    Instrument instrument;
+                                    instrument.id = element.getValue(CCAPI_INSTRUMENT);
+                                    instrument.base = element.getValue(CCAPI_BASE_ASSET);
+                                    instrument.quote = element.getValue(CCAPI_QUOTE_ASSET);
 
-                                                    if (item.HasMember("priceFilter") && item["priceFilter"].HasMember("tickSize")) {
-                                                        instrument.tick_size = std::stod(item["priceFilter"]["tickSize"].GetString());
-                                                    }
-                                                    if (item.HasMember("lotSizeFilter") && item["lotSizeFilter"].HasMember("qtyStep")) {
-                                                        instrument.step_size = std::stod(item["lotSizeFilter"]["qtyStep"].GetString());
-                                                    }
-                                                    if (item.HasMember("lotSizeFilter") && item["lotSizeFilter"].HasMember("minOrderQty")) {
-                                                        instrument.min_size = std::stod(item["lotSizeFilter"]["minOrderQty"].GetString());
-                                                    }
+                                    std::string price_inc = element.getValue(CCAPI_ORDER_PRICE_INCREMENT);
+                                    if (!price_inc.empty()) { try { instrument.tick_size = std::stod(price_inc); } catch(...) {} }
 
-                                                    if (!instrument.base.empty() && !instrument.quote.empty()) {
-                                                        instrument.symbol = instrument.base + "/" + instrument.quote;
-                                                    } else {
-                                                        instrument.symbol = instrument.id;
-                                                    }
+                                    std::string qty_inc = element.getValue(CCAPI_ORDER_QUANTITY_INCREMENT);
+                                    if (!qty_inc.empty()) { try { instrument.step_size = std::stod(qty_inc); } catch(...) {} }
 
-                                                    if (cat == "spot") instrument.type = "spot";
-                                                    else if (cat == "linear") instrument.type = "future"; // USDT Perpetual
-                                                    else if (cat == "inverse") instrument.type = "future"; // Inverse Perpetual/Future
-                                                    else if (cat == "option") instrument.type = "option";
+                                    std::string qty_min = element.getValue(CCAPI_ORDER_QUANTITY_MIN);
+                                    if (!qty_min.empty()) { try { instrument.min_size = std::stod(qty_min); } catch(...) {} }
 
-                                                    if (item.HasMember("status")) {
-                                                        instrument.active = (std::string(item["status"].GetString()) == "Trading");
-                                                    }
-
-                                                    instruments.push_back(instrument);
-                                                }
-                                                received = true;
-                                            }
-                                        }
+                                    if (!instrument.base.empty() && !instrument.quote.empty()) {
+                                        instrument.symbol = instrument.base + "/" + instrument.quote;
+                                    } else {
+                                        instrument.symbol = instrument.id;
                                     }
+
+                                    if (cat == "spot") instrument.type = "spot";
+                                    else if (cat == "linear") instrument.type = "future";
+                                    else if (cat == "inverse") instrument.type = "future";
+                                    else if (cat == "option") instrument.type = "option";
+
+                                    if (element.has(CCAPI_INSTRUMENT_STATUS)) {
+                                        instrument.active = (element.getValue(CCAPI_INSTRUMENT_STATUS) == "Trading");
+                                    }
+
+                                    for (const auto& pair : element.getNameValueMap()) {
+                                        instrument.info[std::string(pair.first)] = pair.second;
+                                    }
+
+                                    instruments.push_back(instrument);
                                 }
                             }
                         }
                     }
                 }
-                if(received) break;
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
         }

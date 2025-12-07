@@ -8,6 +8,8 @@
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
+#include "ccapi_cpp/ccapi_macro.h"
+#include "rapidjson/document.h"
 
 namespace nccapi {
 
@@ -20,8 +22,12 @@ public:
         std::vector<std::string> productTypes = {"USDT-FUTURES", "COIN-FUTURES", "USDC-FUTURES"};
 
         for (const auto& pType : productTypes) {
-             ccapi::Request request(ccapi::Request::Operation::GET_INSTRUMENTS, "bitget-futures");
-             request.appendParam({{"productType", pType}});
+             ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitget-futures", "", "");
+             request.appendParam({
+                 {CCAPI_HTTP_PATH, "/api/mix/v1/market/contracts"},
+                 {CCAPI_HTTP_METHOD, "GET"},
+                 {"productType", pType}
+             });
 
              session->sendRequest(request);
 
@@ -32,45 +38,48 @@ public:
                 for (const auto& event : events) {
                     if (event.getType() == ccapi::Event::Type::RESPONSE) {
                         for (const auto& message : event.getMessageList()) {
-                            if (message.getType() == ccapi::Message::Type::GET_INSTRUMENTS) {
+                            if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
                                 for (const auto& element : message.getElementList()) {
-                                    Instrument instrument;
-                                    instrument.id = element.getValue(CCAPI_INSTRUMENT);
-                                    instrument.base = element.getValue(CCAPI_BASE_ASSET);
-                                    instrument.quote = element.getValue(CCAPI_QUOTE_ASSET);
+                                    if (element.has(CCAPI_HTTP_BODY)) {
+                                        std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                        rapidjson::Document doc;
+                                        doc.Parse(json_str.c_str());
+                                        if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
+                                            for (const auto& item : doc["data"].GetArray()) {
+                                                Instrument instrument;
+                                                instrument.id = item["symbol"].GetString(); // e.g. BTCUSDT_UMCBL
+                                                instrument.base = item["baseCoin"].GetString();
+                                                instrument.quote = item["quoteCoin"].GetString();
 
-                                    std::string price_inc = element.getValue(CCAPI_ORDER_PRICE_INCREMENT);
-                                    if (!price_inc.empty()) { try { instrument.tick_size = std::stod(price_inc); } catch(...) {} }
+                                                if (item.HasMember("pricePlace")) {
+                                                    // tick size often derived from decimal places?
+                                                    // "pricePlace": "1" -> 0.1?
+                                                    // "priceEndStep": "1" -> tick size?
+                                                    // Let's use defaults or parse if available.
+                                                    // Bitget generic contract info has "priceEndStep" or "minTradeNum".
+                                                    // Keeping it simple for ID.
+                                                }
+                                                // Default formatting
+                                                if (item.HasMember("priceEndStep")) instrument.tick_size = std::stod(item["priceEndStep"].GetString());
+                                                if (item.HasMember("minTradeNum")) instrument.min_size = std::stod(item["minTradeNum"].GetString());
 
-                                    std::string qty_inc = element.getValue(CCAPI_ORDER_QUANTITY_INCREMENT);
-                                    if (!qty_inc.empty()) { try { instrument.step_size = std::stod(qty_inc); } catch(...) {} }
+                                                if (!instrument.base.empty() && !instrument.quote.empty()) {
+                                                    instrument.symbol = instrument.base + "/" + instrument.quote;
+                                                } else {
+                                                    instrument.symbol = instrument.id;
+                                                }
+                                                instrument.type = "future";
 
-                                    std::string qty_min = element.getValue(CCAPI_ORDER_QUANTITY_MIN);
-                                    if (!qty_min.empty()) { try { instrument.min_size = std::stod(qty_min); } catch(...) {} }
+                                                if (item.HasMember("symbolStatus")) {
+                                                    instrument.active = (std::string(item["symbolStatus"].GetString()) == "normal");
+                                                }
 
-                                    if(element.has(CCAPI_CONTRACT_SIZE)) {
-                                        std::string val = element.getValue(CCAPI_CONTRACT_SIZE);
-                                        if(!val.empty()) { try { instrument.contract_size = std::stod(val); } catch(...) {} }
+                                                instruments.push_back(instrument);
+                                            }
+                                            received = true;
+                                        }
                                     }
-
-                                    if (!instrument.base.empty() && !instrument.quote.empty()) {
-                                        instrument.symbol = instrument.base + "/" + instrument.quote;
-                                    } else {
-                                        instrument.symbol = instrument.id;
-                                    }
-                                    instrument.type = "future";
-
-                                    if (element.has(CCAPI_INSTRUMENT_STATUS)) {
-                                        instrument.active = (element.getValue(CCAPI_INSTRUMENT_STATUS) == "normal");
-                                    }
-
-                                    for (const auto& pair : element.getNameValueMap()) {
-                                        instrument.info[std::string(pair.first)] = pair.second;
-                                    }
-
-                                    instruments.push_back(instrument);
                                 }
-                                received = true;
                             }
                         }
                     }
@@ -87,13 +96,28 @@ public:
                                                int64_t from_date,
                                                int64_t to_date) {
         std::vector<Candle> candles;
-        ccapi::Request request(ccapi::Request::Operation::GET_HISTORICAL_CANDLESTICKS, "bitget-futures", instrument_name);
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitget-futures", "", "");
+
+        // Bitget Futures Granularity: 1m, 5m, 15m, 30m, 1H, 4H, 12H, 1D, 1W
+        std::string granularity = "1m";
+        if (timeframe == "1m") granularity = "1m";
+        else if (timeframe == "5m") granularity = "5m";
+        else if (timeframe == "15m") granularity = "15m";
+        else if (timeframe == "30m") granularity = "30m";
+        else if (timeframe == "1h") granularity = "1H";
+        else if (timeframe == "4h") granularity = "4H";
+        else if (timeframe == "12h") granularity = "12H";
+        else if (timeframe == "1d") granularity = "1D";
+        else if (timeframe == "1w") granularity = "1W";
+        else granularity = "1m";
 
         request.appendParam({
-            {CCAPI_CANDLESTICK_INTERVAL_SECONDS, std::to_string(timeframeToSeconds(timeframe))},
-            {CCAPI_START_TIME_SECONDS, std::to_string(from_date / 1000)},
-            {CCAPI_END_TIME_SECONDS, std::to_string(to_date / 1000)},
-            {CCAPI_LIMIT, "1000"}
+            {CCAPI_HTTP_PATH, "/api/mix/v1/market/candles"},
+            {CCAPI_HTTP_METHOD, "GET"},
+            {"symbol", instrument_name},
+            {"granularity", granularity},
+            {"startTime", std::to_string(from_date)}, // ms
+            {"endTime", std::to_string(to_date)} // ms
         });
 
         session->sendRequest(request);
@@ -104,20 +128,30 @@ public:
             for (const auto& event : events) {
                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
                     for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GET_HISTORICAL_CANDLESTICKS ||
-                            message.getType() == ccapi::Message::Type::MARKET_DATA_EVENTS_CANDLESTICK) {
+                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
                             for (const auto& element : message.getElementList()) {
-                                Candle candle;
-                                candle.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                    message.getTime().time_since_epoch()).count();
+                                if (element.has(CCAPI_HTTP_BODY)) {
+                                    std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                    rapidjson::Document doc;
+                                    doc.Parse(json_str.c_str());
 
-                                candle.open = std::stod(element.getValue(CCAPI_OPEN_PRICE));
-                                candle.high = std::stod(element.getValue(CCAPI_HIGH_PRICE));
-                                candle.low = std::stod(element.getValue(CCAPI_LOW_PRICE));
-                                candle.close = std::stod(element.getValue(CCAPI_CLOSE_PRICE));
-                                candle.volume = std::stod(element.getValue(CCAPI_VOLUME));
+                                    if (!doc.HasParseError() && doc.IsArray()) { // Response is direct array or object? Bitget V1 is Array of Arrays.
+                                        // Wait, doc says: [ [time, open, high, low, close, vol, quoteVol], ... ]
+                                        for (const auto& item : doc.GetArray()) {
+                                            if (item.IsArray() && item.Size() >= 6) {
+                                                Candle candle;
+                                                candle.timestamp = std::stoll(item[0].GetString());
+                                                candle.open = std::stod(item[1].GetString());
+                                                candle.high = std::stod(item[2].GetString());
+                                                candle.low = std::stod(item[3].GetString());
+                                                candle.close = std::stod(item[4].GetString());
+                                                candle.volume = std::stod(item[5].GetString()); // Base volume
 
-                                candles.push_back(candle);
+                                                candles.push_back(candle);
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
                             return candles;
@@ -126,6 +160,13 @@ public:
                 }
             }
             if (!candles.empty()) {
+                if (from_date > 0 || to_date > 0) {
+                    candles.erase(std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
+                        if (from_date > 0 && c.timestamp < from_date) return true;
+                        if (to_date > 0 && c.timestamp > to_date) return true;
+                        return false;
+                    }), candles.end());
+                }
                 std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
                     return a.timestamp < b.timestamp;
                 });
@@ -134,18 +175,6 @@ public:
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
         return candles;
-    }
-
-    int timeframeToSeconds(const std::string& timeframe) {
-        if (timeframe == "1m") return 60;
-        if (timeframe == "5m") return 300;
-        if (timeframe == "15m") return 900;
-        if (timeframe == "30m") return 1800;
-        if (timeframe == "1h") return 3600;
-        if (timeframe == "4h") return 14400;
-        if (timeframe == "12h") return 43200;
-        if (timeframe == "1d") return 86400;
-        return 60;
     }
 
 private:

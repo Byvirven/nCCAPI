@@ -2,6 +2,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 #include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
@@ -18,51 +19,51 @@ public:
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
-        ccapi::Request request(ccapi::Request::Operation::GET_INSTRUMENTS, "mexc-futures");
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "mexc-futures", "", "");
+        request.appendParam({
+            {CCAPI_HTTP_PATH, "/api/v1/contract/detail"},
+            {CCAPI_HTTP_METHOD, "GET"}
+        });
 
         session->sendRequest(request);
 
         auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(10)) {
+        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
             std::vector<ccapi::Event> events = session->getEventQueue().purge();
             for (const auto& event : events) {
                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
                     for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GET_INSTRUMENTS) {
+                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
                             for (const auto& element : message.getElementList()) {
-                                Instrument instrument;
-                                instrument.id = element.getValue(CCAPI_INSTRUMENT);
-                                instrument.base = element.getValue(CCAPI_BASE_ASSET);
-                                instrument.quote = element.getValue(CCAPI_QUOTE_ASSET);
+                                if (element.has(CCAPI_HTTP_BODY)) {
+                                    std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                    rapidjson::Document doc;
+                                    doc.Parse(json_str.c_str());
 
-                                if (element.has(CCAPI_SETTLE_ASSET)) instrument.settle = element.getValue(CCAPI_SETTLE_ASSET);
+                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
+                                        for (const auto& item : doc["data"].GetArray()) {
+                                            Instrument instrument;
+                                            instrument.id = item["symbol"].GetString();
+                                            instrument.base = item["baseCoin"].GetString();
+                                            instrument.quote = item["quoteCoin"].GetString();
 
-                                std::string price_inc = element.getValue(CCAPI_ORDER_PRICE_INCREMENT);
-                                if (!price_inc.empty()) { try { instrument.tick_size = std::stod(price_inc); } catch(...) {} }
+                                            if (item.HasMember("priceUnit")) instrument.tick_size = item["priceUnit"].GetDouble();
+                                            if (item.HasMember("contractSize")) instrument.contract_size = item["contractSize"].GetDouble();
+                                            if (item.HasMember("minVol")) instrument.min_size = item["minVol"].GetDouble();
 
-                                if(element.has(CCAPI_CONTRACT_SIZE)) {
-                                     std::string val = element.getValue(CCAPI_CONTRACT_SIZE);
-                                     if(!val.empty()) { try { instrument.contract_size = std::stod(val); } catch(...) {} }
+                                            instrument.symbol = instrument.id;
+                                            instrument.type = "future"; // MEXC Futures
+
+                                            if (item.HasMember("state")) {
+                                                instrument.active = (item["state"].GetInt() == 0); // 0: enabled, 1: delivery, etc? Checking docs... usually 0 is enabled
+                                            }
+
+                                            instruments.push_back(instrument);
+                                        }
+                                        return instruments;
+                                    }
                                 }
-
-                                std::string qty_inc = element.getValue(CCAPI_ORDER_QUANTITY_INCREMENT);
-                                if (!qty_inc.empty()) { try { instrument.step_size = std::stod(qty_inc); } catch(...) {} }
-
-                                if (!instrument.base.empty() && !instrument.quote.empty()) {
-                                    instrument.symbol = instrument.base + "/" + instrument.quote;
-                                } else {
-                                    instrument.symbol = instrument.id; // Fallback
-                                }
-
-                                instrument.type = "future";
-
-                                for (const auto& pair : element.getNameValueMap()) {
-                                    instrument.info[std::string(pair.first)] = pair.second;
-                                }
-
-                                instruments.push_back(instrument);
                             }
-                            return instruments;
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
                             return instruments;
                         }
@@ -71,7 +72,6 @@ public:
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
-
         return instruments;
     }
 
@@ -81,10 +81,9 @@ public:
                                                int64_t to_date) {
         std::vector<Candle> candles;
 
-        // Use GENERIC_PUBLIC_REQUEST for MEXC Futures
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "mexc-futures", "", "GET_KLINE");
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "mexc-futures", "", "");
 
-        // Mexc Futures timeframe: Min1, Min5, Min15, Min30, Min60, Hour4, Hour8, Day1, Week1, Month1
+        // MEXC Futures: Min1, Min5, Min15, Min30, Min60, Hour4, Hour8, Day1, Week1, Month1
         std::string interval = "Min1";
         if (timeframe == "1m") interval = "Min1";
         else if (timeframe == "5m") interval = "Min5";
@@ -98,11 +97,13 @@ public:
         else if (timeframe == "1M") interval = "Month1";
         else interval = "Min1";
 
+        std::string path = "/api/v1/contract/kline/" + instrument_name;
+
         request.appendParam({
-            {CCAPI_HTTP_PATH, "/api/v1/contract/kline/" + instrument_name}, // Path param symbol
+            {CCAPI_HTTP_PATH, path},
             {CCAPI_HTTP_METHOD, "GET"},
             {"interval", interval},
-            {"start", std::to_string(from_date / 1000)}, // Seconds
+            {"start", std::to_string(from_date / 1000)}, // seconds
             {"end", std::to_string(to_date / 1000)}
         });
 
@@ -123,29 +124,30 @@ public:
 
                                     if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data")) {
                                         const auto& data = doc["data"];
-                                        // {"time": [...], "open": [...], ...}
-                                        if (data.HasMember("time") && data["time"].IsArray()) {
+                                        // {"time": [t1, t2], "open": [o1, o2], ...} - Structure of Lists?
+                                        // No, usually list of objects or list of lists?
+                                        // Wait, MEXC Futures Kline API documentation:
+                                        // Response: { "success": true, "code": 0, "data": { "time": [...], "open": [...], ... } }
+                                        // It returns separate arrays for each field!
+                                        if (data.IsObject() && data.HasMember("time") && data["time"].IsArray()) {
                                             const auto& times = data["time"];
                                             const auto& opens = data["open"];
+                                            const auto& closes = data["close"];
                                             const auto& highs = data["high"];
                                             const auto& lows = data["low"];
-                                            const auto& closes = data["close"];
                                             const auto& vols = data["vol"];
 
                                             for (rapidjson::SizeType i = 0; i < times.Size(); i++) {
                                                 Candle candle;
-                                                candle.timestamp = (int64_t)times[i].GetInt64() * 1000;
+                                                candle.timestamp = times[i].GetInt64() * 1000;
                                                 candle.open = opens[i].GetDouble();
+                                                candle.close = closes[i].GetDouble();
                                                 candle.high = highs[i].GetDouble();
                                                 candle.low = lows[i].GetDouble();
-                                                candle.close = closes[i].GetDouble();
                                                 candle.volume = vols[i].GetDouble();
+
                                                 candles.push_back(candle);
                                             }
-                                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                                return a.timestamp < b.timestamp;
-                                            });
-                                            return candles;
                                         }
                                     }
                                 }
@@ -155,6 +157,19 @@ public:
                         }
                     }
                 }
+            }
+            if (!candles.empty()) {
+                if (from_date > 0 || to_date > 0) {
+                    candles.erase(std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
+                        if (from_date > 0 && c.timestamp < from_date) return true;
+                        if (to_date > 0 && c.timestamp > to_date) return true;
+                        return false;
+                    }), candles.end());
+                }
+                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                    return a.timestamp < b.timestamp;
+                });
+                return candles;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }

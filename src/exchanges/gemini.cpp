@@ -2,6 +2,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 #include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
@@ -35,19 +36,13 @@ public:
                                 instrument.base = element.getValue(CCAPI_BASE_ASSET);
                                 instrument.quote = element.getValue(CCAPI_QUOTE_ASSET);
 
-                                std::string price_inc = element.getValue(CCAPI_ORDER_PRICE_INCREMENT);
-                                if (!price_inc.empty()) instrument.tick_size = std::stod(price_inc);
-
-                                std::string qty_inc = element.getValue(CCAPI_ORDER_QUANTITY_INCREMENT);
-                                if (!qty_inc.empty()) instrument.step_size = std::stod(qty_inc);
+                                // Gemini tick size / step size not always populated by basic call
 
                                 if (!instrument.base.empty() && !instrument.quote.empty()) {
                                     instrument.symbol = instrument.base + "/" + instrument.quote;
                                 } else {
-                                    instrument.symbol = instrument.id; // Fallback
+                                    instrument.symbol = instrument.id;
                                 }
-
-                                // Gemini is a Spot exchange primarily
                                 instrument.type = "spot";
 
                                 for (const auto& pair : element.getNameValueMap()) {
@@ -65,7 +60,6 @@ public:
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
-
         return instruments;
     }
 
@@ -75,30 +69,24 @@ public:
                                                int64_t to_date) {
         std::vector<Candle> candles;
 
-        // Use GENERIC_PUBLIC_REQUEST for Gemini
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "gemini", "", "GET_CANDLES");
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "gemini", "", "");
 
-        // Gemini timeframe: 1m, 5m, 15m, 30m, 1hr, 6hr, 1day
-        std::string interval = "1m";
-        if (timeframe == "1m") interval = "1m";
-        else if (timeframe == "5m") interval = "5m";
-        else if (timeframe == "15m") interval = "15m";
-        else if (timeframe == "30m") interval = "30m";
-        else if (timeframe == "1h") interval = "1hr";
-        else if (timeframe == "6h") interval = "6hr";
-        else if (timeframe == "1d") interval = "1day";
-        else interval = "1m";
+        // Gemini timeframe: 1m, 5m, 15m, 30m, 1h, 6h, 1d
+        std::string tf = "1m";
+        if (timeframe == "1m") tf = "1m";
+        else if (timeframe == "5m") tf = "5m";
+        else if (timeframe == "15m") tf = "15m";
+        else if (timeframe == "30m") tf = "30m";
+        else if (timeframe == "1h") tf = "1hr"; // Gemini uses "1hr"
+        else if (timeframe == "6h") tf = "6hr";
+        else if (timeframe == "1d") tf = "1day";
+        else tf = "1m";
 
-        // Path: /v2/candles/{symbol}/{timeframe}
-        std::string path = "/v2/candles/" + instrument_name + "/" + interval;
+        std::string path = "/v2/candles/" + instrument_name + "/" + tf;
 
         request.appendParam({
             {CCAPI_HTTP_PATH, path},
             {CCAPI_HTTP_METHOD, "GET"}
-            // Gemini doesn't use "start" param? Docs say query parameters are not used for candles?
-            // Wait, Gemini Sandbox docs say no params. Public API.
-            // It returns generic candles. We might filter them manually.
-            // Docs say `GET /v2/candles/:symbol/:time_frame`.
         });
 
         session->sendRequest(request);
@@ -118,7 +106,7 @@ public:
 
                                     if (!doc.HasParseError() && doc.IsArray()) {
                                         for (const auto& item : doc.GetArray()) {
-                                            // [[time, open, high, low, close, volume], ...]
+                                            // [ time, open, high, low, close, volume ]
                                             if (item.IsArray() && item.Size() >= 6) {
                                                 Candle candle;
                                                 candle.timestamp = item[0].GetInt64();
@@ -128,16 +116,9 @@ public:
                                                 candle.close = item[4].GetDouble();
                                                 candle.volume = item[5].GetDouble();
 
-                                                // Filter by date if needed (Gemini returns latest)
-                                                if (to_date > 0 && candle.timestamp > to_date) continue;
-
                                                 candles.push_back(candle);
                                             }
                                         }
-                                        std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                            return a.timestamp < b.timestamp;
-                                        });
-                                        return candles;
                                     }
                                 }
                             }
@@ -146,6 +127,19 @@ public:
                         }
                     }
                 }
+            }
+            if (!candles.empty()) {
+                if (from_date > 0 || to_date > 0) {
+                    candles.erase(std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
+                        if (from_date > 0 && c.timestamp < from_date) return true;
+                        if (to_date > 0 && c.timestamp > to_date) return true;
+                        return false;
+                    }), candles.end());
+                }
+                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                    return a.timestamp < b.timestamp;
+                });
+                return candles;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }

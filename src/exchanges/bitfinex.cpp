@@ -2,6 +2,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 #include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
@@ -35,8 +36,6 @@ public:
                                 instrument.base = element.getValue(CCAPI_BASE_ASSET);
                                 instrument.quote = element.getValue(CCAPI_QUOTE_ASSET);
 
-                                // Bitfinex doesn't return tick/step size in standard endpoint usually?
-                                // But CCAPI might normalize it if available
                                 std::string qty_min = element.getValue(CCAPI_ORDER_QUANTITY_MIN);
                                 if (!qty_min.empty()) { try { instrument.min_size = std::stod(qty_min); } catch(...) {} }
 
@@ -71,10 +70,8 @@ public:
                                                int64_t to_date) {
         std::vector<Candle> candles;
 
-        // Use GENERIC_PUBLIC_REQUEST for Bitfinex
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitfinex", "", "GET_CANDLES");
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitfinex", "", "");
 
-        // Bitfinex timeframe: 1m, 5m, 15m, 30m, 1h, 3h, 6h, 12h, 1D, 7D, 14D, 1M
         std::string tf = "1m";
         if (timeframe == "1m") tf = "1m";
         else if (timeframe == "5m") tf = "5m";
@@ -88,10 +85,6 @@ public:
         else if (timeframe == "1w") tf = "7D";
         else if (timeframe == "1M") tf = "1M";
         else tf = "1m";
-
-        // Bitfinex API: /v2/candles/trade:{timeframe}:{symbol}/hist
-        // Symbol format: usually tBTCUSD for spot. nCCAPI ID is usually tBTCUSD.
-        // nCCAPI ID for Bitfinex is usually formatted correctly by get_instruments (e.g. tBTCUSD).
 
         std::string path = "/v2/candles/trade:" + tf + ":" + instrument_name + "/hist";
 
@@ -121,7 +114,6 @@ public:
 
                                     if (!doc.HasParseError() && doc.IsArray()) {
                                         for (const auto& item : doc.GetArray()) {
-                                            // [ MTS, OPEN, CLOSE, HIGH, LOW, VOLUME ]
                                             if (item.IsArray() && item.Size() >= 6) {
                                                 Candle candle;
                                                 candle.timestamp = item[0].GetInt64();
@@ -134,11 +126,6 @@ public:
                                                 candles.push_back(candle);
                                             }
                                         }
-                                        // Sort by timestamp
-                                        std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                            return a.timestamp < b.timestamp;
-                                        });
-                                        return candles;
                                     }
                                 }
                             }
@@ -147,6 +134,20 @@ public:
                         }
                     }
                 }
+            }
+            if (!candles.empty()) {
+                // Filter and sort
+                if (from_date > 0 || to_date > 0) {
+                    candles.erase(std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
+                        if (from_date > 0 && c.timestamp < from_date) return true;
+                        if (to_date > 0 && c.timestamp > to_date) return true;
+                        return false;
+                    }), candles.end());
+                }
+                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                    return a.timestamp < b.timestamp;
+                });
+                return candles;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
