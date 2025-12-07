@@ -106,10 +106,27 @@ public:
         else if (timeframe == "1w") granularity = "1W";
         else granularity = "1m";
 
+        std::string symbol = instrument_name;
+        // Try to append suffix if missing and it looks like a USDT pair
+        if (symbol.find("_") == std::string::npos) {
+             // Heuristic: If it ends in USDT, append _UMCBL
+             if (symbol.length() > 4 && symbol.substr(symbol.length() - 4) == "USDT") {
+                 symbol += "_UMCBL";
+             }
+             // Heuristic: If it ends in USD, append _DMCBL (Coin-M)
+             else if (symbol.length() > 3 && symbol.substr(symbol.length() - 3) == "USD") {
+                 symbol += "_DMCBL";
+             }
+             // USDC?
+             else if (symbol.length() > 4 && symbol.substr(symbol.length() - 4) == "USDC") {
+                 symbol += "_CMCBL";
+             }
+        }
+
         request.appendParam({
             {CCAPI_HTTP_PATH, "/api/mix/v1/market/candles"},
             {CCAPI_HTTP_METHOD, "GET"},
-            {"symbol", instrument_name},
+            {"symbol", symbol},
             {"granularity", granularity},
             {"startTime", std::to_string(from_date)}, // ms
             {"endTime", std::to_string(to_date)} // ms
@@ -130,8 +147,9 @@ public:
                                     rapidjson::Document doc;
                                     doc.Parse(json_str.c_str());
 
-                                    if (!doc.HasParseError() && doc.IsArray()) {
-                                        for (const auto& item : doc.GetArray()) {
+                                    // Bitget Mix V1 returns Object with "data" array
+                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
+                                        for (const auto& item : doc["data"].GetArray()) {
                                             if (item.IsArray() && item.Size() >= 6) {
                                                 Candle candle;
                                                 candle.timestamp = std::stoll(item[0].GetString());
