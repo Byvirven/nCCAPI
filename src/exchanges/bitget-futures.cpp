@@ -19,15 +19,12 @@ public:
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
+        // Restore Native GET_INSTRUMENTS which worked (644 pairs)
         std::vector<std::string> productTypes = {"USDT-FUTURES", "COIN-FUTURES", "USDC-FUTURES"};
 
         for (const auto& pType : productTypes) {
-             ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitget-futures", "", "");
-             request.appendParam({
-                 {CCAPI_HTTP_PATH, "/api/mix/v1/market/contracts"},
-                 {CCAPI_HTTP_METHOD, "GET"},
-                 {"productType", pType}
-             });
+             ccapi::Request request(ccapi::Request::Operation::GET_INSTRUMENTS, "bitget-futures");
+             request.appendParam({{"productType", pType}});
 
              session->sendRequest(request);
 
@@ -38,48 +35,45 @@ public:
                 for (const auto& event : events) {
                     if (event.getType() == ccapi::Event::Type::RESPONSE) {
                         for (const auto& message : event.getMessageList()) {
-                            if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                            if (message.getType() == ccapi::Message::Type::GET_INSTRUMENTS) {
                                 for (const auto& element : message.getElementList()) {
-                                    if (element.has(CCAPI_HTTP_BODY)) {
-                                        std::string json_str = element.getValue(CCAPI_HTTP_BODY);
-                                        rapidjson::Document doc;
-                                        doc.Parse(json_str.c_str());
-                                        if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
-                                            for (const auto& item : doc["data"].GetArray()) {
-                                                Instrument instrument;
-                                                instrument.id = item["symbol"].GetString(); // e.g. BTCUSDT_UMCBL
-                                                instrument.base = item["baseCoin"].GetString();
-                                                instrument.quote = item["quoteCoin"].GetString();
+                                    Instrument instrument;
+                                    instrument.id = element.getValue(CCAPI_INSTRUMENT);
+                                    instrument.base = element.getValue(CCAPI_BASE_ASSET);
+                                    instrument.quote = element.getValue(CCAPI_QUOTE_ASSET);
 
-                                                if (item.HasMember("pricePlace")) {
-                                                    // tick size often derived from decimal places?
-                                                    // "pricePlace": "1" -> 0.1?
-                                                    // "priceEndStep": "1" -> tick size?
-                                                    // Let's use defaults or parse if available.
-                                                    // Bitget generic contract info has "priceEndStep" or "minTradeNum".
-                                                    // Keeping it simple for ID.
-                                                }
-                                                // Default formatting
-                                                if (item.HasMember("priceEndStep")) instrument.tick_size = std::stod(item["priceEndStep"].GetString());
-                                                if (item.HasMember("minTradeNum")) instrument.min_size = std::stod(item["minTradeNum"].GetString());
+                                    std::string price_inc = element.getValue(CCAPI_ORDER_PRICE_INCREMENT);
+                                    if (!price_inc.empty()) { try { instrument.tick_size = std::stod(price_inc); } catch(...) {} }
 
-                                                if (!instrument.base.empty() && !instrument.quote.empty()) {
-                                                    instrument.symbol = instrument.base + "/" + instrument.quote;
-                                                } else {
-                                                    instrument.symbol = instrument.id;
-                                                }
-                                                instrument.type = "future";
+                                    std::string qty_inc = element.getValue(CCAPI_ORDER_QUANTITY_INCREMENT);
+                                    if (!qty_inc.empty()) { try { instrument.step_size = std::stod(qty_inc); } catch(...) {} }
 
-                                                if (item.HasMember("symbolStatus")) {
-                                                    instrument.active = (std::string(item["symbolStatus"].GetString()) == "normal");
-                                                }
+                                    std::string qty_min = element.getValue(CCAPI_ORDER_QUANTITY_MIN);
+                                    if (!qty_min.empty()) { try { instrument.min_size = std::stod(qty_min); } catch(...) {} }
 
-                                                instruments.push_back(instrument);
-                                            }
-                                            received = true;
-                                        }
+                                    if(element.has(CCAPI_CONTRACT_SIZE)) {
+                                        std::string val = element.getValue(CCAPI_CONTRACT_SIZE);
+                                        if(!val.empty()) { try { instrument.contract_size = std::stod(val); } catch(...) {} }
                                     }
+
+                                    if (!instrument.base.empty() && !instrument.quote.empty()) {
+                                        instrument.symbol = instrument.base + "/" + instrument.quote;
+                                    } else {
+                                        instrument.symbol = instrument.id;
+                                    }
+                                    instrument.type = "future";
+
+                                    if (element.has(CCAPI_INSTRUMENT_STATUS)) {
+                                        instrument.active = (element.getValue(CCAPI_INSTRUMENT_STATUS) == "normal");
+                                    }
+
+                                    for (const auto& pair : element.getNameValueMap()) {
+                                        instrument.info[std::string(pair.first)] = pair.second;
+                                    }
+
+                                    instruments.push_back(instrument);
                                 }
+                                received = true;
                             }
                         }
                     }
@@ -96,6 +90,7 @@ public:
                                                int64_t from_date,
                                                int64_t to_date) {
         std::vector<Candle> candles;
+        // Keep GENERIC for candles as Native returned 0.
         ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitget-futures", "", "");
 
         // Bitget Futures Granularity: 1m, 5m, 15m, 30m, 1H, 4H, 12H, 1D, 1W
@@ -135,8 +130,7 @@ public:
                                     rapidjson::Document doc;
                                     doc.Parse(json_str.c_str());
 
-                                    if (!doc.HasParseError() && doc.IsArray()) { // Response is direct array or object? Bitget V1 is Array of Arrays.
-                                        // Wait, doc says: [ [time, open, high, low, close, vol, quoteVol], ... ]
+                                    if (!doc.HasParseError() && doc.IsArray()) {
                                         for (const auto& item : doc.GetArray()) {
                                             if (item.IsArray() && item.Size() >= 6) {
                                                 Candle candle;
