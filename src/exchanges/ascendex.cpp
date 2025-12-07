@@ -2,6 +2,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 #include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
@@ -46,7 +47,7 @@ public:
                                 } else {
                                     instrument.symbol = instrument.id;
                                 }
-                                instrument.type = "spot"; // Ascendex is mainly spot here
+                                instrument.type = "spot";
 
                                 for (const auto& pair : element.getNameValueMap()) {
                                     instrument.info[std::string(pair.first)] = pair.second;
@@ -72,8 +73,7 @@ public:
                                                int64_t to_date) {
         std::vector<Candle> candles;
 
-        // Use GENERIC_PUBLIC_REQUEST for AscendEX
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "ascendex", "", "GET_BAR_HIST");
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "ascendex", "", "");
 
         // AscendEX timeframe: 1, 5, 15, 30, 60, 120, 240, 360, 720, 1d, 1m, 1w (string)
         std::string interval = "1";
@@ -118,21 +118,34 @@ public:
 
                                     if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
                                         for (const auto& item : doc["data"].GetArray()) {
-                                            // {"m": "bar", "s": "BTC/USDT", "i": "1", "data": [{"t": 166..., "o": "...", "c": "...", "h": "...", "l": "...", "v": "..."}]}
-                                            // Wait, the API returns:
-                                            // {"code": 0, "data": [ {"t": 123, "o": "1", "c": "1", ...} ] }
                                             if (item.IsObject()) {
                                                 Candle candle;
-                                                if (item.HasMember("t")) {
-                                                    candle.timestamp = item["t"].GetInt64();
+                                                if (item.HasMember("data") && item["data"].IsObject()) {
+                                                    const auto& d = item["data"];
+                                                    if (d.HasMember("ts")) candle.timestamp = d["ts"].GetInt64();
+                                                    if (d.HasMember("o")) candle.open = std::stod(d["o"].GetString());
+                                                    if (d.HasMember("h")) candle.high = std::stod(d["h"].GetString());
+                                                    if (d.HasMember("l")) candle.low = std::stod(d["l"].GetString());
+                                                    if (d.HasMember("c")) candle.close = std::stod(d["c"].GetString());
+                                                    if (d.HasMember("v")) candle.volume = std::stod(d["v"].GetString());
+                                                    candles.push_back(candle);
+                                                } else {
+                                                    // Direct object? AscendEX response: "data": [ { "m": "bar", "s": "BTC/USDT", "data": { "i": "1", "ts": 157..., "o":... } } ]
+                                                    // NO, wait.
+                                                    // Documentation: GET /api/pro/v1/barhist
+                                                    // Response: { "code": 0, "data": [ { "m": "bar", "s": "BTC/USDT", "data": { "i": "1", "ts": 1575503040000, "o": "7538.99", "c": "7538.99", "h": "7538.99", "l": "7538.99", "v": "0" } }, ... ] }
+                                                    // So item has "data" field which contains the OHLCV.
+                                                    if (item.HasMember("data") && item["data"].IsObject()) {
+                                                        const auto& d = item["data"];
+                                                        if (d.HasMember("ts")) candle.timestamp = d["ts"].GetInt64();
+                                                        if (d.HasMember("o")) candle.open = std::stod(d["o"].GetString());
+                                                        if (d.HasMember("h")) candle.high = std::stod(d["h"].GetString());
+                                                        if (d.HasMember("l")) candle.low = std::stod(d["l"].GetString());
+                                                        if (d.HasMember("c")) candle.close = std::stod(d["c"].GetString());
+                                                        if (d.HasMember("v")) candle.volume = std::stod(d["v"].GetString());
+                                                        candles.push_back(candle);
+                                                    }
                                                 }
-                                                if (item.HasMember("o")) candle.open = std::stod(item["o"].GetString());
-                                                if (item.HasMember("h")) candle.high = std::stod(item["h"].GetString());
-                                                if (item.HasMember("l")) candle.low = std::stod(item["l"].GetString());
-                                                if (item.HasMember("c")) candle.close = std::stod(item["c"].GetString());
-                                                if (item.HasMember("v")) candle.volume = std::stod(item["v"].GetString());
-
-                                                candles.push_back(candle);
                                             }
                                         }
                                         std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
