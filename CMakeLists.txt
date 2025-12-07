@@ -14,11 +14,13 @@ find_package(ZLIB REQUIRED)
 include(ExternalProject)
 if(NOT BOOST_INCLUDE_DIR)
   ExternalProject_Add(boost URL https://archives.boost.io/release/1.87.0/source/boost_1_87_0.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP true
     SOURCE_DIR "${CMAKE_BINARY_DIR}/boost" CONFIGURE_COMMAND "" BUILD_COMMAND "" INSTALL_COMMAND "" TEST_COMMAND "")
   set(BOOST_INCLUDE_DIR "${CMAKE_BINARY_DIR}/boost")
 endif()
 if(NOT RAPIDJSON_INCLUDE_DIR)
   ExternalProject_Add(rapidjson URL https://github.com/Tencent/rapidjson/archive/3b2441b87f99ab65f37b141a7b548ebadb607b96.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP true
     SOURCE_DIR "${CMAKE_BINARY_DIR}/rapidjson" CONFIGURE_COMMAND "" BUILD_COMMAND "" INSTALL_COMMAND "" TEST_COMMAND "")
   set(RAPIDJSON_INCLUDE_DIR "${CMAKE_BINARY_DIR}/rapidjson/include")
 endif()
@@ -53,7 +55,3 @@ target_link_libraries(test_structure nccapi OpenSSL::SSL OpenSSL::Crypto Threads
 # Test Historical
 add_executable(test_historical tests/test_historical.cpp)
 target_link_libraries(test_historical nccapi OpenSSL::SSL OpenSSL::Crypto Threads::Threads ZLIB::ZLIB dl)
-
-# Repro OKX
-add_executable(repro_okx src/repro_okx.cpp)
-target_link_libraries(repro_okx nccapi OpenSSL::SSL OpenSSL::Crypto Threads::Threads ZLIB::ZLIB dl)
