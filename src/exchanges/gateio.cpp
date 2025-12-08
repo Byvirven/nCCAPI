@@ -91,13 +91,14 @@ public:
         else if (timeframe == "1w") interval = "7d";
         else interval = "1m";
 
+        std::string query_string = "currency_pair=" + instrument_name + "&interval=" + interval;
+        if (from_date > 0) query_string += "&from=" + std::to_string(from_date / 1000); // seconds
+        if (to_date > 0) query_string += "&to=" + std::to_string(to_date / 1000);
+
         request.appendParam({
-            {CCAPI_HTTP_PATH, "/api/v4/spot/candlesticks"},
             {CCAPI_HTTP_METHOD, "GET"},
-            {"currency_pair", instrument_name},
-            {"interval", interval},
-            {"from", std::to_string(from_date / 1000)}, // seconds
-            {"to", std::to_string(to_date / 1000)}
+            {CCAPI_HTTP_PATH, "/api/v4/spot/candlesticks"},
+            {CCAPI_HTTP_QUERY_STRING, query_string}
         });
 
         session->sendRequest(request);
@@ -120,8 +121,16 @@ public:
                                             // [ timestamp (sec), volume, close, high, low, open, ... ] (strings)
                                             if (item.IsArray() && item.Size() >= 6) {
                                                 Candle candle;
+                                                // GateIO Spot:
+                                                // 0: timestamp (string)
+                                                // 1: volume (string)
+                                                // 2: close (string)
+                                                // 3: high (string)
+                                                // 4: low (string)
+                                                // 5: open (string)
+
                                                 candle.timestamp = std::stoll(item[0].GetString()) * 1000;
-                                                candle.volume = std::stod(item[1].GetString()); // volume
+                                                candle.volume = std::stod(item[1].GetString());
                                                 candle.close = std::stod(item[2].GetString());
                                                 candle.high = std::stod(item[3].GetString());
                                                 candle.low = std::stod(item[4].GetString());

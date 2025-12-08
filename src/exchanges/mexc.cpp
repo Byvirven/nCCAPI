@@ -2,6 +2,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 #include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
@@ -90,14 +91,15 @@ public:
         else if (timeframe == "1M") interval = "1M";
         else interval = "1m";
 
+        std::string query_string = "symbol=" + instrument_name + "&interval=" + interval;
+        if (from_date > 0) query_string += "&startTime=" + std::to_string(from_date);
+        if (to_date > 0) query_string += "&endTime=" + std::to_string(to_date);
+        query_string += "&limit=1000";
+
         request.appendParam({
             {CCAPI_HTTP_PATH, "/api/v3/klines"},
             {CCAPI_HTTP_METHOD, "GET"},
-            {"symbol", instrument_name},
-            {"interval", interval},
-            {"startTime", std::to_string(from_date)}, // ms
-            {"endTime", std::to_string(to_date)},
-            {"limit", "1000"}
+            {CCAPI_HTTP_QUERY_STRING, query_string}
         });
 
         session->sendRequest(request);
@@ -138,14 +140,32 @@ public:
                                                 candles.push_back(candle);
                                             }
                                         }
+                                        // Sort first
                                         std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
                                             return a.timestamp < b.timestamp;
                                         });
+
+                                        // Filter
+                                        if (!candles.empty()) {
+                                            if (from_date > 0 || to_date > 0) {
+                                                candles.erase(std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
+                                                    if (from_date > 0 && c.timestamp < from_date) return true;
+                                                    if (to_date > 0 && c.timestamp > to_date) return true;
+                                                    return false;
+                                                }), candles.end());
+                                            }
+                                        }
                                         return candles;
+                                    } else {
+                                        // std::cout << "[DEBUG] MEXC Parse Error or Not Array: " << json_str << std::endl;
                                     }
                                 }
                             }
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                            std::cout << "[DEBUG] MEXC Error: " << message.toString() << std::endl;
+                            for (const auto& elem : message.getElementList()) {
+                                std::cout << "Element: " << elem.toString() << std::endl;
+                            }
                             return candles;
                         }
                     }

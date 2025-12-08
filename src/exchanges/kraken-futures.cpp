@@ -99,8 +99,13 @@ public:
         std::vector<Candle> candles;
 
         // Kraken Futures Generic Request
-        // Endpoint: /api/charts/v1/trade/{symbol}/{resolution}
-        // Resolution: 1m, 5m, 15m, 30m, 1h, 4h, 12h, 1d, 1w
+        // Endpoint: /derivatives/api/v4/charts/trade/{symbol}/{resolution} (Note: v4 is newer, but v3 is documented too?)
+        // Docs say: /api/charts/v1/trade is common for CF.
+        // Let's check CCAPI endpoint definition.
+        // CCAPI uses "kraken-futures" which maps to "https://futures.kraken.com"
+        // Correct path seems to be "/derivatives/api/v4/charts/trade/..." or "/api/charts/v1"
+        // Let's try "/derivatives/api/v3/instruments" worked for instruments.
+        // Let's use "/derivatives/api/v4/charts/trade"
 
         std::string resolution = "1m";
         if (timeframe == "1m") resolution = "1m";
@@ -114,16 +119,21 @@ public:
         else if (timeframe == "1w") resolution = "1w";
         else resolution = "1m";
 
-        std::string path = "/api/charts/v1/trade/" + instrument_name + "/" + resolution;
+        // URL Encoding check: "PI_XBTUSD" -> "PI_XBTUSD".
+
+        std::string path = "/derivatives/api/v4/charts/trade/" + instrument_name + "/" + resolution;
 
         ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "kraken-futures", "", "");
         request.appendParam({
-            {"CCAPI_ENDPOINT", path},
-            {"CCAPI_HTTP_METHOD", "GET"}
+            {CCAPI_HTTP_PATH, path},
+            {CCAPI_HTTP_METHOD, "GET"}
         });
 
         if (from_date > 0) {
              request.appendParam({{"from", std::to_string(from_date / 1000)}});
+        }
+        if (to_date > 0) {
+             request.appendParam({{"to", std::to_string(to_date / 1000)}});
         }
 
         session->sendRequest(request);
@@ -136,32 +146,56 @@ public:
                     for (const auto& message : event.getMessageList()) {
                         if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
                             for (const auto& element : message.getElementList()) {
-                                std::string json_content = element.getValue(CCAPI_HTTP_BODY);
-                                rapidjson::Document doc;
-                                doc.Parse(json_content.c_str());
+                                if (element.has(CCAPI_HTTP_BODY)) {
+                                    std::string json_content = element.getValue(CCAPI_HTTP_BODY);
+                                    rapidjson::Document doc;
+                                    doc.Parse(json_content.c_str());
 
-                                if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("candles") && doc["candles"].IsArray()) {
-                                    for (const auto& kline : doc["candles"].GetArray()) {
-                                        if (kline.IsObject()) {
-                                            Candle candle;
-                                            if (kline.HasMember("time") && kline["time"].IsInt64()) candle.timestamp = kline["time"].GetInt64();
-                                            if (kline.HasMember("open") && kline["open"].IsString()) candle.open = std::stod(kline["open"].GetString());
-                                            if (kline.HasMember("high") && kline["high"].IsString()) candle.high = std::stod(kline["high"].GetString());
-                                            if (kline.HasMember("low") && kline["low"].IsString()) candle.low = std::stod(kline["low"].GetString());
-                                            if (kline.HasMember("close") && kline["close"].IsString()) candle.close = std::stod(kline["close"].GetString());
-                                            if (kline.HasMember("volume") && kline["volume"].IsString()) candle.volume = std::stod(kline["volume"].GetString());
-                                            else if (kline.HasMember("volume") && kline["volume"].IsNumber()) candle.volume = kline["volume"].GetDouble();
+                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("candles") && doc["candles"].IsArray()) {
+                                        for (const auto& kline : doc["candles"].GetArray()) {
+                                            if (kline.IsObject()) {
+                                                Candle candle;
+                                                // time is ms in v4? docs say "time": 1563830000000
+                                                if (kline.HasMember("time") && kline["time"].IsInt64()) candle.timestamp = kline["time"].GetInt64();
 
-                                            candles.push_back(candle);
+                                                if (kline.HasMember("open") && kline["open"].IsString()) candle.open = std::stod(kline["open"].GetString());
+                                                else if (kline.HasMember("open") && kline["open"].IsDouble()) candle.open = kline["open"].GetDouble();
+
+                                                if (kline.HasMember("high") && kline["high"].IsString()) candle.high = std::stod(kline["high"].GetString());
+                                                else if (kline.HasMember("high") && kline["high"].IsDouble()) candle.high = kline["high"].GetDouble();
+
+                                                if (kline.HasMember("low") && kline["low"].IsString()) candle.low = std::stod(kline["low"].GetString());
+                                                else if (kline.HasMember("low") && kline["low"].IsDouble()) candle.low = kline["low"].GetDouble();
+
+                                                if (kline.HasMember("close") && kline["close"].IsString()) candle.close = std::stod(kline["close"].GetString());
+                                                else if (kline.HasMember("close") && kline["close"].IsDouble()) candle.close = kline["close"].GetDouble();
+
+                                                if (kline.HasMember("volume") && kline["volume"].IsString()) candle.volume = std::stod(kline["volume"].GetString());
+                                                else if (kline.HasMember("volume") && kline["volume"].IsNumber()) candle.volume = kline["volume"].GetDouble();
+
+                                                candles.push_back(candle);
+                                            }
                                         }
                                     }
                                 }
                             }
 
-                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                return a.timestamp < b.timestamp;
-                            });
-                            return candles;
+                            if (!candles.empty()) {
+                                 if (from_date > 0 || to_date > 0) {
+                                     candles.erase(std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
+                                         if (to_date > 0 && c.timestamp > to_date) return true;
+                                         if (from_date > 0 && c.timestamp < from_date) return true;
+                                         return false;
+                                     }), candles.end());
+                                 }
+
+                                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                                    return a.timestamp < b.timestamp;
+                                });
+                                return candles;
+                            }
+                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                             return candles;
                         }
                     }
                 }

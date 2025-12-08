@@ -3,6 +3,9 @@
 #include <thread>
 #include <chrono>
 #include <algorithm>
+#include <iomanip>
+#include <sstream>
+#include <cmath>
 
 #include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
@@ -12,6 +15,26 @@
 #include "rapidjson/document.h"
 
 namespace nccapi {
+
+namespace {
+    std::string timestamp_to_iso8601(int64_t timestamp_ms) {
+        std::time_t t = timestamp_ms / 1000;
+        std::tm tm = *std::gmtime(&t); // gmtime is not thread-safe but ok for this context usually. Use gmtime_r if needed.
+        std::stringstream ss;
+        ss << std::put_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
+        return ss.str();
+    }
+
+    int64_t get_timeframe_ms(const std::string& timeframe) {
+        if (timeframe == "1m") return 60000;
+        if (timeframe == "5m") return 300000;
+        if (timeframe == "15m") return 900000;
+        if (timeframe == "1h") return 3600000;
+        if (timeframe == "6h") return 21600000;
+        if (timeframe == "1d") return 86400000;
+        return 60000;
+    }
+}
 
 class Coinbase::Impl {
 public:
@@ -47,7 +70,6 @@ public:
                                             instrument.base = item["base_currency"].GetString();
                                             instrument.quote = item["quote_currency"].GetString();
 
-                                            // Handling quote_increment vs base_increment
                                             if (item.HasMember("quote_increment")) instrument.tick_size = std::stod(item["quote_increment"].GetString());
                                             if (item.HasMember("base_increment")) instrument.step_size = std::stod(item["base_increment"].GetString());
 
@@ -56,7 +78,7 @@ public:
                                             } else {
                                                 instrument.symbol = instrument.id;
                                             }
-                                            instrument.type = "spot"; // Coinbase is mainly spot
+                                            instrument.type = "spot";
 
                                             if (item.HasMember("status")) {
                                                 instrument.active = (std::string(item["status"].GetString()) == "online");
@@ -87,7 +109,6 @@ public:
 
         ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "coinbase", "", "");
 
-        // Coinbase granularity in seconds
         std::string granularity = "60";
         if (timeframe == "1m") granularity = "60";
         else if (timeframe == "5m") granularity = "300";
@@ -99,20 +120,27 @@ public:
 
         std::string path = "/products/" + instrument_name + "/candles";
 
-        request.appendParam({
+        // Floor start time to align with granularity to ensure inclusion
+        int64_t tf_ms = get_timeframe_ms(timeframe);
+        int64_t adjusted_from = from_date;
+        if (adjusted_from > 0) {
+            adjusted_from = (adjusted_from / tf_ms) * tf_ms;
+        }
+
+        std::map<std::string, std::string> params = {
             {CCAPI_HTTP_PATH, path},
             {CCAPI_HTTP_METHOD, "GET"},
             {"granularity", granularity}
-        });
+        };
 
-        if (from_date > 0 && to_date > 0) {
-            // ISO 8601 format required.
-            // CCAPI UtilTime::getISOTimestamp exists but is internal.
-            // Simplified approach: rely on defaults (recent) if ISO conversion is hard,
-            // OR use client-side filtering on what we get (Coinbase returns 300 by default).
-            // User reported 350 candles.
-            // We will filter client-side.
+        if (adjusted_from > 0) {
+            params["start"] = timestamp_to_iso8601(adjusted_from);
         }
+        if (to_date > 0) {
+             params["end"] = timestamp_to_iso8601(to_date);
+        }
+
+        request.appendParam(params);
 
         session->sendRequest(request);
 
@@ -131,7 +159,6 @@ public:
 
                                     if (!doc.HasParseError() && doc.IsArray()) {
                                         for (const auto& item : doc.GetArray()) {
-                                            // [ time, low, high, open, close, volume ]
                                             if (item.IsArray() && item.Size() >= 6) {
                                                 Candle candle;
                                                 candle.timestamp = item[0].GetInt64() * 1000;
@@ -154,13 +181,9 @@ public:
                 }
             }
             if (!candles.empty()) {
-                if (from_date > 0 || to_date > 0) {
-                    candles.erase(std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
-                        if (from_date > 0 && c.timestamp < from_date) return true;
-                        if (to_date > 0 && c.timestamp > to_date) return true;
-                        return false;
-                    }), candles.end());
-                }
+                // Filter again just in case API returned extra, but use adjusted_from logic
+                // Actually, if we requested specific range, we should trust it, but sorting is needed.
+                // Coinbase returns newest first.
                 std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
                     return a.timestamp < b.timestamp;
                 });

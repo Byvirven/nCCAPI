@@ -36,12 +36,6 @@ public:
                                 instrument.base = element.getValue(CCAPI_BASE_ASSET);
                                 instrument.quote = element.getValue(CCAPI_QUOTE_ASSET);
 
-                                std::string price_inc = element.getValue(CCAPI_ORDER_PRICE_INCREMENT);
-                                if (!price_inc.empty()) { try { instrument.tick_size = std::stod(price_inc); } catch(...) {} }
-
-                                std::string qty_inc = element.getValue(CCAPI_ORDER_QUANTITY_INCREMENT);
-                                if (!qty_inc.empty()) { try { instrument.step_size = std::stod(qty_inc); } catch(...) {} }
-
                                 if (!instrument.base.empty() && !instrument.quote.empty()) {
                                     instrument.symbol = instrument.base + "/" + instrument.quote;
                                 } else {
@@ -73,9 +67,6 @@ public:
                                                int64_t to_date) {
         std::vector<Candle> candles;
 
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "ascendex", "", "");
-
-        // AscendEX timeframe: 1, 5, 15, 30, 60, 120, 240, 360, 720, 1d, 1m, 1w (string)
         std::string interval = "1";
         if (timeframe == "1m") interval = "1";
         else if (timeframe == "5m") interval = "5";
@@ -91,14 +82,16 @@ public:
         else if (timeframe == "1M") interval = "1m";
         else interval = "1";
 
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "ascendex", "", "");
+
+        std::string query_string = "symbol=" + instrument_name + "&interval=" + interval;
+        if (from_date > 0) query_string += "&from=" + std::to_string(from_date);
+        if (to_date > 0) query_string += "&to=" + std::to_string(to_date);
+
         request.appendParam({
-            {CCAPI_HTTP_PATH, "/api/pro/v1/barhist"},
             {CCAPI_HTTP_METHOD, "GET"},
-            {"symbol", instrument_name},
-            {"interval", interval},
-            {"from", std::to_string(from_date)}, // ms
-            {"to", std::to_string(to_date)},
-            {"n", "500"} // Limit
+            {CCAPI_HTTP_PATH, "/api/pro/v1/barhist"},
+            {CCAPI_HTTP_QUERY_STRING, query_string}
         });
 
         session->sendRequest(request);
@@ -111,55 +104,60 @@ public:
                     for (const auto& message : event.getMessageList()) {
                         if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
                             for (const auto& element : message.getElementList()) {
+                                // Debug: Print available keys
+                                /*
+                                std::cout << "[DEBUG] Available keys: ";
+                                for(const auto& kv : element.getNameValueMap()) {
+                                    std::cout << kv.first << " ";
+                                }
+                                std::cout << std::endl;
+                                */
+
                                 if (element.has(CCAPI_HTTP_BODY)) {
                                     std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                    // std::cout << "[DEBUG] Body: " << json_str << std::endl;
                                     rapidjson::Document doc;
                                     doc.Parse(json_str.c_str());
 
                                     if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
-                                        for (const auto& item : doc["data"].GetArray()) {
-                                            if (item.IsObject()) {
+                                        for (const auto& bar : doc["data"].GetArray()) {
+                                            if (bar.HasMember("data") && bar["data"].IsObject()) {
+                                                const auto& c_obj = bar["data"];
                                                 Candle candle;
-                                                if (item.HasMember("data") && item["data"].IsObject()) {
-                                                    const auto& d = item["data"];
-                                                    if (d.HasMember("ts")) candle.timestamp = d["ts"].GetInt64();
-                                                    if (d.HasMember("o")) candle.open = std::stod(d["o"].GetString());
-                                                    if (d.HasMember("h")) candle.high = std::stod(d["h"].GetString());
-                                                    if (d.HasMember("l")) candle.low = std::stod(d["l"].GetString());
-                                                    if (d.HasMember("c")) candle.close = std::stod(d["c"].GetString());
-                                                    if (d.HasMember("v")) candle.volume = std::stod(d["v"].GetString());
-                                                    candles.push_back(candle);
-                                                } else {
-                                                    // Direct object? AscendEX response: "data": [ { "m": "bar", "s": "BTC/USDT", "data": { "i": "1", "ts": 157..., "o":... } } ]
-                                                    // NO, wait.
-                                                    // Documentation: GET /api/pro/v1/barhist
-                                                    // Response: { "code": 0, "data": [ { "m": "bar", "s": "BTC/USDT", "data": { "i": "1", "ts": 1575503040000, "o": "7538.99", "c": "7538.99", "h": "7538.99", "l": "7538.99", "v": "0" } }, ... ] }
-                                                    // So item has "data" field which contains the OHLCV.
-                                                    if (item.HasMember("data") && item["data"].IsObject()) {
-                                                        const auto& d = item["data"];
-                                                        if (d.HasMember("ts")) candle.timestamp = d["ts"].GetInt64();
-                                                        if (d.HasMember("o")) candle.open = std::stod(d["o"].GetString());
-                                                        if (d.HasMember("h")) candle.high = std::stod(d["h"].GetString());
-                                                        if (d.HasMember("l")) candle.low = std::stod(d["l"].GetString());
-                                                        if (d.HasMember("c")) candle.close = std::stod(d["c"].GetString());
-                                                        if (d.HasMember("v")) candle.volume = std::stod(d["v"].GetString());
-                                                        candles.push_back(candle);
-                                                    }
-                                                }
+                                                if (c_obj.HasMember("ts") && c_obj["ts"].IsInt64()) candle.timestamp = c_obj["ts"].GetInt64();
+
+                                                if (c_obj.HasMember("o") && c_obj["o"].IsString()) candle.open = std::stod(c_obj["o"].GetString());
+                                                if (c_obj.HasMember("h") && c_obj["h"].IsString()) candle.high = std::stod(c_obj["h"].GetString());
+                                                if (c_obj.HasMember("l") && c_obj["l"].IsString()) candle.low = std::stod(c_obj["l"].GetString());
+                                                if (c_obj.HasMember("c") && c_obj["c"].IsString()) candle.close = std::stod(c_obj["c"].GetString());
+                                                if (c_obj.HasMember("v") && c_obj["v"].IsString()) candle.volume = std::stod(c_obj["v"].GetString());
+
+                                                candles.push_back(candle);
                                             }
                                         }
-                                        std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                            return a.timestamp < b.timestamp;
-                                        });
-                                        return candles;
                                     }
                                 }
                             }
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                            std::cout << "[DEBUG] AscendEx Error: " << message.toString() << std::endl;
                             return candles;
                         }
                     }
                 }
+            }
+
+            if (!candles.empty()) {
+                if (from_date > 0 || to_date > 0) {
+                    candles.erase(std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
+                        if (from_date > 0 && c.timestamp < from_date) return true;
+                        if (to_date > 0 && c.timestamp > to_date) return true;
+                        return false;
+                    }), candles.end());
+                }
+                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                    return a.timestamp < b.timestamp;
+                });
+                return candles;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }

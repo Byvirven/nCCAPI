@@ -90,7 +90,7 @@ public:
                                                int64_t from_date,
                                                int64_t to_date) {
         std::vector<Candle> candles;
-        // Keep GENERIC for candles as Native returned 0.
+
         ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitget-futures", "", "");
 
         // Bitget Futures Granularity: 1m, 5m, 15m, 30m, 1H, 4H, 12H, 1D, 1W
@@ -107,29 +107,32 @@ public:
         else granularity = "1m";
 
         std::string symbol = instrument_name;
-        // Try to append suffix if missing and it looks like a USDT pair
-        if (symbol.find("_") == std::string::npos) {
-             // Heuristic: If it ends in USDT, append _UMCBL
-             if (symbol.length() > 4 && symbol.substr(symbol.length() - 4) == "USDT") {
-                 symbol += "_UMCBL";
-             }
-             // Heuristic: If it ends in USD, append _DMCBL (Coin-M)
-             else if (symbol.length() > 3 && symbol.substr(symbol.length() - 3) == "USD") {
-                 symbol += "_DMCBL";
-             }
-             // USDC?
-             else if (symbol.length() > 4 && symbol.substr(symbol.length() - 4) == "USDC") {
-                 symbol += "_CMCBL";
-             }
+        // Strip suffixes if they exist from V1 IDs (e.g. BTCUSDT_UMCBL -> BTCUSDT)
+        size_t underscore = symbol.find("_");
+        if (underscore != std::string::npos) {
+            symbol = symbol.substr(0, underscore);
         }
 
+        std::string productType = "USDT-FUTURES"; // Default
+
+        // Heuristic to detect product type
+        if (instrument_name.find("USDT") != std::string::npos) {
+            productType = "USDT-FUTURES";
+        } else if (instrument_name.find("USDC") != std::string::npos) {
+            productType = "USDC-FUTURES";
+        } else if (instrument_name.find("USD") != std::string::npos && instrument_name.find("USDT") == std::string::npos) {
+            // BTCUSD but not BTCUSDT
+            productType = "COIN-FUTURES";
+        }
+
+        std::string query_string = "symbol=" + symbol + "&granularity=" + granularity + "&productType=" + productType;
+        if (from_date > 0) query_string += "&startTime=" + std::to_string(from_date);
+        if (to_date > 0) query_string += "&endTime=" + std::to_string(to_date);
+
         request.appendParam({
-            {CCAPI_HTTP_PATH, "/api/mix/v1/market/candles"},
+            {CCAPI_HTTP_PATH, "/api/v2/mix/market/candles"},
             {CCAPI_HTTP_METHOD, "GET"},
-            {"symbol", symbol},
-            {"granularity", granularity},
-            {"startTime", std::to_string(from_date)}, // ms
-            {"endTime", std::to_string(to_date)} // ms
+            {CCAPI_HTTP_QUERY_STRING, query_string}
         });
 
         session->sendRequest(request);
@@ -147,7 +150,7 @@ public:
                                     rapidjson::Document doc;
                                     doc.Parse(json_str.c_str());
 
-                                    // Bitget Mix V1 returns Object with "data" array
+                                    // Bitget V2 returns Object with "data" array (array of arrays)
                                     if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
                                         for (const auto& item : doc["data"].GetArray()) {
                                             if (item.IsArray() && item.Size() >= 6) {
@@ -162,10 +165,13 @@ public:
                                                 candles.push_back(candle);
                                             }
                                         }
+                                    } else {
+                                        // std::cout << "[DEBUG] Bitget Futures Parse Error or No Data: " << json_str << std::endl;
                                     }
                                 }
                             }
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                            std::cout << "[DEBUG] Bitget Futures Error: " << message.toString() << std::endl;
                             return candles;
                         }
                     }

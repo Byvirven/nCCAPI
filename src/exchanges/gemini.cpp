@@ -13,6 +13,17 @@
 
 namespace nccapi {
 
+namespace {
+    int64_t get_timeframe_ms(const std::string& timeframe) {
+        if (timeframe == "1m") return 60000;
+        if (timeframe == "5m") return 300000;
+        if (timeframe == "15m") return 900000;
+        if (timeframe == "1h") return 3600000;
+        // ...
+        return 60000;
+    }
+}
+
 class Gemini::Impl {
 public:
     Impl(std::shared_ptr<UnifiedSession> s) : session(s) {}
@@ -91,6 +102,13 @@ public:
 
         session->sendRequest(request);
 
+        // Adjust from_date for filter
+        int64_t tf_ms = get_timeframe_ms(timeframe);
+        int64_t adjusted_from = from_date;
+        if (adjusted_from > 0) {
+            adjusted_from = (adjusted_from / tf_ms) * tf_ms;
+        }
+
         auto start = std::chrono::steady_clock::now();
         while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
             std::vector<ccapi::Event> events = session->getEventQueue().purge();
@@ -129,9 +147,10 @@ public:
                 }
             }
             if (!candles.empty()) {
-                if (from_date > 0 || to_date > 0) {
-                    candles.erase(std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
-                        if (from_date > 0 && c.timestamp < from_date) return true;
+                if (adjusted_from > 0 || to_date > 0) {
+                    candles.erase(std::remove_if(candles.begin(), candles.end(), [adjusted_from, to_date](const Candle& c) {
+                        // Use adjusted_from which is floored
+                        if (adjusted_from > 0 && c.timestamp < adjusted_from) return true;
                         if (to_date > 0 && c.timestamp > to_date) return true;
                         return false;
                     }), candles.end());

@@ -13,6 +13,17 @@
 
 namespace nccapi {
 
+namespace {
+    int64_t get_timeframe_ms(const std::string& timeframe) {
+        if (timeframe == "1m") return 60000;
+        if (timeframe == "5m") return 300000;
+        if (timeframe == "15m") return 900000;
+        if (timeframe == "1h") return 3600000;
+        // ...
+        return 60000;
+    }
+}
+
 class Bitfinex::Impl {
 public:
     Impl(std::shared_ptr<UnifiedSession> s) : session(s) {}
@@ -88,11 +99,18 @@ public:
 
         std::string path = "/v2/candles/trade:" + tf + ":" + instrument_name + "/hist";
 
+        // Align start time to timeframe to avoid missing the first candle if start > candle_start
+        int64_t tf_ms = get_timeframe_ms(timeframe);
+        int64_t adjusted_from = from_date;
+        if (adjusted_from > 0) {
+            adjusted_from = (adjusted_from / tf_ms) * tf_ms;
+        }
+
         request.appendParam({
             {CCAPI_HTTP_PATH, path},
             {CCAPI_HTTP_METHOD, "GET"},
             {"limit", "1000"},
-            {"start", std::to_string(from_date)}, // ms
+            {"start", std::to_string(adjusted_from)}, // ms
             {"end", std::to_string(to_date)},
             {"sort", "1"} // old to new
         });
@@ -136,14 +154,14 @@ public:
                 }
             }
             if (!candles.empty()) {
-                // Filter and sort
-                if (from_date > 0 || to_date > 0) {
-                    candles.erase(std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
-                        if (from_date > 0 && c.timestamp < from_date) return true;
-                        if (to_date > 0 && c.timestamp > to_date) return true;
-                        return false;
-                    }), candles.end());
-                }
+                // Filter: we adjusted start time, so we might get one extra at the beginning if from_date was slightly later.
+                // But generally users want the candle that COVERS from_date if from_date is inclusive.
+                // Standard convention: returns candles with OPEN_TIME >= from_date.
+                // If we aligned from_date down, we get OPEN_TIME >= aligned_from.
+                // If aligned_from < from_date, we get a candle starting before from_date.
+                // We should keep it if the user intended "1 hour ago".
+                // So no strict filtering here.
+
                 std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
                     return a.timestamp < b.timestamp;
                 });

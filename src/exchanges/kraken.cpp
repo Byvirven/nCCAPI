@@ -20,10 +20,6 @@ public:
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
-        // Kraken instruments need explicit pairs or generic request?
-        // CCAPI GET_INSTRUMENTS works for Kraken?
-        // Yes, generally.
-
         ccapi::Request request(ccapi::Request::Operation::GET_INSTRUMENTS, "kraken");
 
         session->sendRequest(request);
@@ -81,15 +77,6 @@ public:
                                                int64_t to_date) {
         std::vector<Candle> candles;
 
-        // Kraken Spot Generic Request
-        // Endpoint: /0/public/OHLC
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "kraken", "", "");
-        request.appendParam({
-            {CCAPI_HTTP_PATH, "/0/public/OHLC"},
-            {CCAPI_HTTP_METHOD, "GET"}
-        });
-
-        // Kraken interval: 1 (minute), 5, 15, 30, 60, 240, 1440, 10080, 21600
         std::string interval = "1";
         if (timeframe == "1m") interval = "1";
         else if (timeframe == "5m") interval = "5";
@@ -101,15 +88,19 @@ public:
         else if (timeframe == "1w") interval = "10080";
         else interval = "1";
 
-        request.appendParam({
-            {"pair", instrument_name},
-            {"interval", interval}
-        });
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "kraken", "", "");
 
+        std::string query_string = "pair=" + instrument_name + "&interval=" + interval;
         if (from_date > 0) {
-            // Kraken uses 'since' in seconds
-             request.appendParam({{"since", std::to_string(from_date / 1000)}});
+            query_string += "&since=" + std::to_string(from_date / 1000);
         }
+
+        // Use CCAPI_HTTP_QUERY_STRING as advised
+        request.appendParam({
+            {CCAPI_HTTP_METHOD, "GET"},
+            {CCAPI_HTTP_PATH, "/0/public/OHLC"},
+            {CCAPI_HTTP_QUERY_STRING, query_string}
+        });
 
         session->sendRequest(request);
 
@@ -121,30 +112,39 @@ public:
                     for (const auto& message : event.getMessageList()) {
                         if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
                             for (const auto& element : message.getElementList()) {
-                                std::string json_content = element.getValue(CCAPI_HTTP_BODY);
-                                rapidjson::Document doc;
-                                doc.Parse(json_content.c_str());
+                                if (element.has(CCAPI_HTTP_BODY)) {
+                                    std::string json_content = element.getValue(CCAPI_HTTP_BODY);
+                                    rapidjson::Document doc;
+                                    doc.Parse(json_content.c_str());
 
-                                if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("result") && doc["result"].IsObject()) {
-                                    const auto& result = doc["result"];
-                                    // Result keys are pair names, e.g. "XXBTZUSD". We iterate members.
-                                    for (auto itr = result.MemberBegin(); itr != result.MemberEnd(); ++itr) {
-                                        if (std::string(itr->name.GetString()) != "last" && itr->value.IsArray()) {
-                                            for (const auto& kline : itr->value.GetArray()) {
-                                                if (kline.IsArray() && kline.Size() >= 6) {
-                                                    Candle candle;
-                                                    // [time, open, high, low, close, vwap, volume, count]
-                                                    if (kline[0].IsInt64()) candle.timestamp = kline[0].GetInt64() * 1000;
-                                                    else if (kline[0].IsDouble()) candle.timestamp = (int64_t)kline[0].GetDouble() * 1000; // Kraken sometimes uses float for time?
+                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("result") && doc["result"].IsObject()) {
+                                        const auto& result = doc["result"];
+                                        // Result keys are pair names, e.g. "XXBTZUSD". We iterate members.
+                                        for (auto itr = result.MemberBegin(); itr != result.MemberEnd(); ++itr) {
+                                            if (std::string(itr->name.GetString()) != "last" && itr->value.IsArray()) {
+                                                for (const auto& kline : itr->value.GetArray()) {
+                                                    if (kline.IsArray() && kline.Size() >= 6) {
+                                                        Candle candle;
+                                                        if (kline[0].IsInt64()) candle.timestamp = kline[0].GetInt64() * 1000;
+                                                        else if (kline[0].IsDouble()) candle.timestamp = (int64_t)(kline[0].GetDouble() * 1000);
 
-                                                    candle.open = std::stod(kline[1].GetString());
-                                                    candle.high = std::stod(kline[2].GetString());
-                                                    candle.low = std::stod(kline[3].GetString());
-                                                    candle.close = std::stod(kline[4].GetString());
-                                                    // kline[5] is vwap
-                                                    candle.volume = std::stod(kline[6].GetString());
+                                                        if (kline[1].IsString()) candle.open = std::stod(kline[1].GetString());
+                                                        else if (kline[1].IsDouble()) candle.open = kline[1].GetDouble();
 
-                                                    candles.push_back(candle);
+                                                        if (kline[2].IsString()) candle.high = std::stod(kline[2].GetString());
+                                                        else if (kline[2].IsDouble()) candle.high = kline[2].GetDouble();
+
+                                                        if (kline[3].IsString()) candle.low = std::stod(kline[3].GetString());
+                                                        else if (kline[3].IsDouble()) candle.low = kline[3].GetDouble();
+
+                                                        if (kline[4].IsString()) candle.close = std::stod(kline[4].GetString());
+                                                        else if (kline[4].IsDouble()) candle.close = kline[4].GetDouble();
+
+                                                        if (kline[6].IsString()) candle.volume = std::stod(kline[6].GetString());
+                                                        else if (kline[6].IsDouble()) candle.volume = kline[6].GetDouble();
+
+                                                        candles.push_back(candle);
+                                                    }
                                                 }
                                             }
                                         }
@@ -152,10 +152,22 @@ public:
                                 }
                             }
 
-                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                return a.timestamp < b.timestamp;
-                            });
-                            return candles;
+                            if (!candles.empty()) {
+                                 if (from_date > 0 || to_date > 0) {
+                                     candles.erase(std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
+                                         if (to_date > 0 && c.timestamp > to_date) return true;
+                                         if (from_date > 0 && c.timestamp < from_date) return true;
+                                         return false;
+                                     }), candles.end());
+                                 }
+
+                                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                                    return a.timestamp < b.timestamp;
+                                });
+                                return candles;
+                            }
+                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                             return candles;
                         }
                     }
                 }
