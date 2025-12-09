@@ -79,12 +79,8 @@ public:
         // Huobi Spot Generic Request
         // Endpoint: /market/history/kline
         ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "huobi", "", "");
-        request.appendParam({
-            {CCAPI_HTTP_PATH, "/market/history/kline"},
-            {CCAPI_HTTP_METHOD, "GET"}
-        });
 
-        // Huobi period: 1min, 5min, 15min, 30min, 60min, 4hour, 1day, 1mon, 1week, 1year
+        // Huobi period mapping
         std::string period = "1min";
         if (timeframe == "1m") period = "1min";
         else if (timeframe == "5m") period = "5min";
@@ -97,10 +93,12 @@ public:
         else if (timeframe == "1M") period = "1mon";
         else period = "1min";
 
+        std::string query = "symbol=" + instrument_name + "&period=" + period + "&size=2000";
+
         request.appendParam({
-            {"symbol", instrument_name},
-            {"period", period},
-            {"size", "2000"}
+            {CCAPI_HTTP_PATH, "/market/history/kline"},
+            {CCAPI_HTTP_METHOD, "GET"},
+            {CCAPI_HTTP_QUERY_STRING, query}
         });
 
         session->sendRequest(request);

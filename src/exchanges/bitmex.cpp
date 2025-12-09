@@ -10,6 +10,9 @@
 #include "ccapi_cpp/ccapi_message.h"
 #include "ccapi_cpp/ccapi_macro.h"
 
+// Explicitly include ccapi_util_private.h for UtilTime
+#include "ccapi_cpp/ccapi_util_private.h"
+
 #include "rapidjson/document.h"
 #include "rapidjson/writer.h"
 #include "rapidjson/stringbuffer.h"
@@ -122,11 +125,8 @@ public:
 
         // Manual Generic Request for BitMEX
         ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitmex", "", "");
-        request.appendParam({
-            {CCAPI_HTTP_PATH, "/api/v1/trade/bucketed"},
-            {CCAPI_HTTP_METHOD, "GET"}
-        });
 
+        // Build Query String manually
         // Bitmex binSize: 1m, 5m, 1h, 1d
         std::string binSize = "1m";
         if (timeframe == "1m") binSize = "1m";
@@ -134,18 +134,13 @@ public:
         else if (timeframe == "1h") binSize = "1h";
         else if (timeframe == "1d") binSize = "1d";
 
-        request.appendParam({
-            {"symbol", instrument_name},
-            {"binSize", binSize},
-            {"count", "500"}, // Bitmex max count per request
-            {"reverse", "true"} // Get most recent first
-        });
+        std::string query = "symbol=" + instrument_name + "&binSize=" + binSize + "&count=500&reverse=true";
 
-        if (from_date > 0) {
-             // Bitmex requires ISO 8601 for startTime/endTime.
-             // We omit it for now as conversion is complex without UtilTime exposure.
-             // reverse=true gives recent candles.
-        }
+        request.appendParam({
+            {CCAPI_HTTP_PATH, "/api/v1/trade/bucketed"},
+            {CCAPI_HTTP_METHOD, "GET"},
+            {CCAPI_HTTP_QUERY_STRING, query}
+        });
 
         session->sendRequest(request);
 
@@ -166,16 +161,6 @@ public:
                                         Candle candle;
                                         if (kline.HasMember("timestamp") && kline["timestamp"].IsString()) {
                                             std::string ts = kline["timestamp"].GetString();
-                                            // ISO8601 parsing manually is hard.
-                                            // We rely on CCAPI's internal util or external lib.
-                                            // For now, we skip timestamp parsing if complex?
-                                            // Or use a simple heuristic if format is fixed: "2023-10-27T12:00:00.000Z"
-                                            // Since I can't easily parse it, I might return 0?
-                                            // Wait, without timestamp, sorting and validation fails.
-                                            // I should try to use ccapi::UtilTime if possible.
-                                            // It is available in <ccapi_cpp/ccapi_util_time.h> if included.
-                                            // But I included sessions/unified_session.hpp which likely includes it.
-                                            // Let's try `ccapi::UtilTime::parse(ts)`.
                                             try {
                                                 auto tp = ccapi::UtilTime::parse(ts);
                                                 candle.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count();

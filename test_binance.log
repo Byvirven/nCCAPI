@@ -1,0 +1,6 @@
+[36m==========================================[0m
+[36mTesting exchange: binance[0m
+[36m==========================================[0m
+Fetching instruments...
+[32mSuccess. Found 0 instruments.[0m
+[31mSkipping historical test (no instruments found).[0m

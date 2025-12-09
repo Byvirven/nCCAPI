@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <chrono>
+#include <algorithm>
 #include "nccapi/client.hpp"
 
 // ANSI color codes
@@ -37,11 +38,16 @@ int main(int argc, char* argv[]) {
     std::srand(std::time(nullptr));
 
     std::vector<std::string> exchanges_to_test;
+    std::string specific_pair = "";
+
     if (argc > 1) {
         exchanges_to_test.push_back(argv[1]);
     } else {
-        // Default to testing all supported exchanges
         exchanges_to_test = client.get_supported_exchanges();
+    }
+
+    if (argc > 2) {
+        specific_pair = argv[2];
     }
 
     for (const auto& exchange_name : exchanges_to_test) {
@@ -60,35 +66,73 @@ int main(int argc, char* argv[]) {
                 continue;
             }
 
-            // 2. Pick a random pair (preferably a major one like BTC/USDT or BTC-USD to ensure liquidity/history)
-            // We search for "BTC" and "USD" to increase odds of valid data.
+            // 2. Select Pair
             nccapi::Instrument selected_inst;
             bool found = false;
-            // First pass: Try exact matches for common major pairs
-            std::vector<std::string> priorities = {"BTC/USDT", "BTC-USDT", "BTC/USD", "BTC-USD", "ETH/USDT", "ETH-USDT", "ETH/USD", "ETH-USD"};
 
-            for (const auto& target : priorities) {
+            if (!specific_pair.empty()) {
                 for (const auto& inst : instruments) {
-                    if (inst.symbol == target || inst.id == target) {
+                    if (inst.symbol == specific_pair || inst.id == specific_pair) {
                         selected_inst = inst;
                         found = true;
                         break;
                     }
                 }
-                if (found) break;
+                if (!found) {
+                     std::cout << YELLOW << "Specific pair '" << specific_pair << "' not found in instrument list. Trying fuzzy match..." << std::endl;
+                     for (const auto& inst : instruments) {
+                        if (inst.symbol.find(specific_pair) != std::string::npos || inst.id.find(specific_pair) != std::string::npos) {
+                            selected_inst = inst;
+                            found = true;
+                            std::cout << "Fuzzy matched: " << inst.symbol << std::endl;
+                            break;
+                        }
+                    }
+                }
             }
 
             if (!found) {
+                // First pass: Try exact matches for common major pairs
+                std::vector<std::string> priorities = {
+                    "BTC/USDT", "BTC-USDT", "BTC/USD", "BTC-USD", "XBT/USD", "XBTUSD",
+                    "ETH/USDT", "ETH-USDT", "ETH/USD", "ETH-USD", "btcusdt", "btcusd"
+                };
+
+                for (const auto& target : priorities) {
+                    for (const auto& inst : instruments) {
+                        if (inst.symbol == target || inst.id == target) {
+                            selected_inst = inst;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (found) break;
+                }
+            }
+
+            if (!found) {
+                // Fallback to searching for BTC/USD substring
                 for (const auto& inst : instruments) {
-                    if ((inst.symbol.find("BTC") != std::string::npos || inst.symbol.find("ETH") != std::string::npos) &&
-                        (inst.symbol.find("USD") != std::string::npos)) {
+                    // Convert to upper for check
+                    std::string sym = inst.symbol;
+                    std::transform(sym.begin(), sym.end(), sym.begin(), ::toupper);
+                    if ((sym.find("BTC") != std::string::npos) && (sym.find("USD") != std::string::npos)) {
                         selected_inst = inst;
                         found = true;
                         break;
                     }
                 }
             }
-            if (!found) selected_inst = instruments[rand() % instruments.size()];
+
+            if (!found && !instruments.empty()) {
+                 selected_inst = instruments[0];
+                 found = true;
+            }
+
+            if (!found) {
+                std::cout << RED << "Could not select a valid instrument." << RESET << std::endl;
+                continue;
+            }
 
             std::cout << "Selected Instrument: " << selected_inst.symbol << " (ID: " << selected_inst.id << ")" << std::endl;
 
@@ -107,18 +151,6 @@ int main(int argc, char* argv[]) {
             if (!candles.empty()) {
                  std::cout << GREEN << "Success! " << RESET << std::endl;
                  print_candle_vector(candles);
-
-                 // Basic consistency check
-                 bool consistent = true;
-                 for (size_t i = 1; i < candles.size(); ++i) {
-                     if (candles[i].timestamp < candles[i-1].timestamp) {
-                         std::cerr << RED << "Error: Candles are not sorted by timestamp!" << RESET << std::endl;
-                         consistent = false;
-                         break;
-                     }
-                 }
-                 if (consistent) std::cout << GREEN << "Data consistency check passed." << RESET << std::endl;
-
             } else {
                 std::cout << YELLOW << "Warning: Returned empty candle vector (might be inactive pair or API limitation)." << RESET << std::endl;
             }

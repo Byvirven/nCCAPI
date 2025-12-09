@@ -20,10 +20,23 @@ public:
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
         ccapi::Request request(ccapi::Request::Operation::GET_INSTRUMENTS, "deribit");
+        request.appendParam({
+            {"currency", "BTC"}, // Deribit requires currency, defaulting to BTC
+            {"kind", "future"}
+        });
 
         session->sendRequest(request);
 
+        // Fetch ETH as well
+        ccapi::Request request2(ccapi::Request::Operation::GET_INSTRUMENTS, "deribit");
+        request2.appendParam({
+            {"currency", "ETH"},
+            {"kind", "future"}
+        });
+        session->sendRequest(request2);
+
         auto start = std::chrono::steady_clock::now();
+        int responses = 0;
         while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
             std::vector<ccapi::Event> events = session->getEventQueue().purge();
             for (const auto& event : events) {
@@ -45,17 +58,12 @@ public:
                                 std::string qty_min = element.getValue(CCAPI_ORDER_QUANTITY_MIN);
                                 if (!qty_min.empty()) { try { instrument.min_size = std::stod(qty_min); } catch(...) {} }
 
-                                if(element.has(CCAPI_CONTRACT_SIZE)) {
-                                     std::string val = element.getValue(CCAPI_CONTRACT_SIZE);
-                                     if(!val.empty()) { try { instrument.contract_size = std::stod(val); } catch(...) {} }
-                                }
-
                                 if (!instrument.base.empty() && !instrument.quote.empty()) {
                                     instrument.symbol = instrument.base + "/" + instrument.quote;
                                 } else {
                                     instrument.symbol = instrument.id;
                                 }
-                                instrument.type = "option"; // Deribit mostly
+                                instrument.type = "future";
 
                                 for (const auto& pair : element.getNameValueMap()) {
                                     instrument.info[std::string(pair.first)] = pair.second;
@@ -63,9 +71,10 @@ public:
 
                                 instruments.push_back(instrument);
                             }
-                            return instruments;
+                            responses++;
+                            if (responses >= 2) return instruments; // Got BTC and ETH
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                            return instruments;
+                             // Ignore error, might just be one currency failing
                         }
                     }
                 }
@@ -81,25 +90,29 @@ public:
                                                int64_t to_date) {
         std::vector<Candle> candles;
 
+        // Deribit Generic Request
+        // Endpoint: /api/v2/public/get_tradingview_chart_data
         ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "deribit", "", "");
 
         // Deribit resolution: 1, 3, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1D
         std::string resolution = "1";
         if (timeframe == "1m") resolution = "1";
         else if (timeframe == "5m") resolution = "5";
-        else if (timeframe == "15m") resolution = "15";
-        else if (timeframe == "30m") resolution = "30";
         else if (timeframe == "1h") resolution = "60";
         else if (timeframe == "1d") resolution = "1D";
-        else resolution = "1";
+
+        std::string query = "instrument_name=" + instrument_name + "&resolution=" + resolution;
+        if (from_date > 0) {
+            query += "&start_timestamp=" + std::to_string(from_date);
+        }
+        if (to_date > 0) {
+            query += "&end_timestamp=" + std::to_string(to_date);
+        }
 
         request.appendParam({
-            {CCAPI_HTTP_PATH, "/public/get_tradingview_chart_data"},
+            {CCAPI_HTTP_PATH, "/api/v2/public/get_tradingview_chart_data"},
             {CCAPI_HTTP_METHOD, "GET"},
-            {"instrument_name", instrument_name},
-            {"resolution", resolution},
-            {"start_timestamp", std::to_string(from_date)}, // ms
-            {"end_timestamp", std::to_string(to_date)} // ms
+            {CCAPI_HTTP_QUERY_STRING, query}
         });
 
         session->sendRequest(request);
@@ -117,30 +130,31 @@ public:
                                     rapidjson::Document doc;
                                     doc.Parse(json_str.c_str());
 
-                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("result")) {
-                                        // {"result": {"ticks": [t1, t2], "open": [o1, o2], ...}}
-                                        const auto& result = doc["result"];
-                                        if (result.IsObject() && result.HasMember("ticks") && result["ticks"].IsArray()) {
-                                            const auto& ticks = result["ticks"];
-                                            const auto& opens = result["open"];
-                                            const auto& closes = result["close"];
-                                            const auto& highs = result["high"];
-                                            const auto& lows = result["low"];
-                                            const auto& vols = result["volume"];
+                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("result") && doc["result"].IsObject()) {
+                                        const auto& res = doc["result"];
+                                        if (res.HasMember("ticks") && res["ticks"].IsArray()) {
+                                            const auto& ticks = res["ticks"];
+                                            const auto& opens = res["open"];
+                                            const auto& highs = res["high"];
+                                            const auto& lows = res["low"];
+                                            const auto& closes = res["close"];
+                                            const auto& volumes = res["volume"];
 
-                                            for (rapidjson::SizeType i = 0; i < ticks.Size(); i++) {
+                                            for (size_t i = 0; i < ticks.Size(); ++i) {
                                                 Candle candle;
-                                                candle.timestamp = ticks[i].GetInt64(); // Deribit uses ms for TradingView?
-                                                // Wait, ticks is usually ms.
+                                                candle.timestamp = ticks[i].GetInt64();
                                                 candle.open = opens[i].GetDouble();
-                                                candle.close = closes[i].GetDouble();
                                                 candle.high = highs[i].GetDouble();
                                                 candle.low = lows[i].GetDouble();
-                                                candle.volume = vols[i].GetDouble();
-
+                                                candle.close = closes[i].GetDouble();
+                                                candle.volume = volumes[i].GetDouble();
                                                 candles.push_back(candle);
                                             }
                                         }
+                                        std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                                            return a.timestamp < b.timestamp;
+                                        });
+                                        return candles;
                                     }
                                 }
                             }
@@ -149,19 +163,6 @@ public:
                         }
                     }
                 }
-            }
-            if (!candles.empty()) {
-                if (from_date > 0 || to_date > 0) {
-                    candles.erase(std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
-                        if (from_date > 0 && c.timestamp < from_date) return true;
-                        if (to_date > 0 && c.timestamp > to_date) return true;
-                        return false;
-                    }), candles.end());
-                }
-                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                    return a.timestamp < b.timestamp;
-                });
-                return candles;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }

@@ -76,32 +76,25 @@ public:
                                                int64_t to_date) {
         std::vector<Candle> candles;
 
+        // Bitstamp uses /api/v2/ohlc/{symbol}/
+        // We must manually construct URL
+        std::string path = "/api/v2/ohlc/" + instrument_name + "/";
+
         ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitstamp", "", "");
 
-        // Bitstamp step (seconds): 60, 180, 300, 900, 1800, 3600, 7200, 14400, 21600, 43200, 86400, 259200
         std::string step = "60";
         if (timeframe == "1m") step = "60";
-        else if (timeframe == "5m") step = "300";
-        else if (timeframe == "15m") step = "900";
-        else if (timeframe == "30m") step = "1800";
         else if (timeframe == "1h") step = "3600";
-        else if (timeframe == "2h") step = "7200";
-        else if (timeframe == "4h") step = "14400";
-        else if (timeframe == "6h") step = "21600";
-        else if (timeframe == "12h") step = "43200";
         else if (timeframe == "1d") step = "86400";
-        else if (timeframe == "3d") step = "259200";
-        else step = "60";
 
-        std::string path = "/api/v2/ohlc/" + instrument_name + "/";
+        std::string query = "step=" + step + "&limit=1000";
+
+        // Bitstamp does not support start/end for OHLC easily in public API v2, mainly step/limit
 
         request.appendParam({
             {CCAPI_HTTP_PATH, path},
             {CCAPI_HTTP_METHOD, "GET"},
-            {"step", step},
-            {"limit", "1000"},
-            {"start", std::to_string(from_date / 1000)}, // seconds
-            {"end", std::to_string(to_date / 1000)}
+            {CCAPI_HTTP_QUERY_STRING, query}
         });
 
         session->sendRequest(request);
@@ -119,24 +112,27 @@ public:
                                     rapidjson::Document doc;
                                     doc.Parse(json_str.c_str());
 
-                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data")) {
-                                        const auto& data = doc["data"];
-                                        if (data.IsObject() && data.HasMember("ohlc") && data["ohlc"].IsArray()) {
-                                            for (const auto& item : data["ohlc"].GetArray()) {
-                                                // {"high": "...", "timestamp": "...", "volume": "...", "low": "...", "close": "...", "open": "..."}
-                                                if (item.IsObject()) {
-                                                    Candle candle;
-                                                    if (item.HasMember("timestamp")) candle.timestamp = std::stoll(item["timestamp"].GetString()) * 1000;
-                                                    if (item.HasMember("open")) candle.open = std::stod(item["open"].GetString());
-                                                    if (item.HasMember("high")) candle.high = std::stod(item["high"].GetString());
-                                                    if (item.HasMember("low")) candle.low = std::stod(item["low"].GetString());
-                                                    if (item.HasMember("close")) candle.close = std::stod(item["close"].GetString());
-                                                    if (item.HasMember("volume")) candle.volume = std::stod(item["volume"].GetString());
-
-                                                    candles.push_back(candle);
+                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsObject() && doc["data"].HasMember("ohlc") && doc["data"]["ohlc"].IsArray()) {
+                                        for (const auto& item : doc["data"]["ohlc"].GetArray()) {
+                                            if (item.IsObject()) {
+                                                Candle candle;
+                                                if (item.HasMember("timestamp")) {
+                                                    std::string ts = item["timestamp"].GetString();
+                                                    candle.timestamp = std::stoll(ts) * 1000;
                                                 }
+                                                if (item.HasMember("open")) candle.open = std::stod(item["open"].GetString());
+                                                if (item.HasMember("high")) candle.high = std::stod(item["high"].GetString());
+                                                if (item.HasMember("low")) candle.low = std::stod(item["low"].GetString());
+                                                if (item.HasMember("close")) candle.close = std::stod(item["close"].GetString());
+                                                if (item.HasMember("volume")) candle.volume = std::stod(item["volume"].GetString());
+
+                                                candles.push_back(candle);
                                             }
                                         }
+                                        std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                                            return a.timestamp < b.timestamp;
+                                        });
+                                        return candles;
                                     }
                                 }
                             }
@@ -145,12 +141,6 @@ public:
                         }
                     }
                 }
-            }
-            if (!candles.empty()) {
-                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                    return a.timestamp < b.timestamp;
-                });
-                return candles;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
