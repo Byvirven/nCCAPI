@@ -3,6 +3,7 @@
 #include <thread>
 #include <chrono>
 #include <algorithm>
+#include <vector>
 
 #include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
@@ -19,67 +20,72 @@ public:
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
-        ccapi::Request request(ccapi::Request::Operation::GET_INSTRUMENTS, "deribit");
-        request.appendParam({
-            {"currency", "BTC"}, // Deribit requires currency, defaulting to BTC
-            {"kind", "future"}
-        });
+        // Deribit requires iterating over currencies and kinds
+        std::vector<std::string> currencies = {"BTC", "ETH", "USDC", "USDT", "SOL", "EUR", "XRP", "MATIC", "LTC"};
+        std::vector<std::string> kinds = {"future", "option", "spot"};
 
-        session->sendRequest(request);
+        for (const auto& currency : currencies) {
+            for (const auto& kind : kinds) {
+                // Spot only supports specific currency pairs, but Deribit API is flexible.
+                // However, asking for kind='spot' with currency='BTC' returns BTC_USDC etc.
 
-        // Fetch ETH as well
-        ccapi::Request request2(ccapi::Request::Operation::GET_INSTRUMENTS, "deribit");
-        request2.appendParam({
-            {"currency", "ETH"},
-            {"kind", "future"}
-        });
-        session->sendRequest(request2);
+                ccapi::Request request(ccapi::Request::Operation::GET_INSTRUMENTS, "deribit");
+                request.appendParam({
+                    {"currency", currency},
+                    {"kind", kind}
+                });
 
-        auto start = std::chrono::steady_clock::now();
-        int responses = 0;
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
-            std::vector<ccapi::Event> events = session->getEventQueue().purge();
-            for (const auto& event : events) {
-                if (event.getType() == ccapi::Event::Type::RESPONSE) {
-                    for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GET_INSTRUMENTS) {
-                            for (const auto& element : message.getElementList()) {
-                                Instrument instrument;
-                                instrument.id = element.getValue(CCAPI_INSTRUMENT);
-                                instrument.base = element.getValue(CCAPI_BASE_ASSET);
-                                instrument.quote = element.getValue(CCAPI_QUOTE_ASSET);
+                session->sendRequest(request);
 
-                                std::string price_inc = element.getValue(CCAPI_ORDER_PRICE_INCREMENT);
-                                if (!price_inc.empty()) { try { instrument.tick_size = std::stod(price_inc); } catch(...) {} }
+                auto start = std::chrono::steady_clock::now();
+                bool received = false;
+                // Short timeout per request to avoid hanging too long on empty sets
+                while (std::chrono::steady_clock::now() - start < std::chrono::seconds(3)) {
+                    std::vector<ccapi::Event> events = session->getEventQueue().purge();
+                    for (const auto& event : events) {
+                        if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                            for (const auto& message : event.getMessageList()) {
+                                if (message.getType() == ccapi::Message::Type::GET_INSTRUMENTS) {
+                                    for (const auto& element : message.getElementList()) {
+                                        Instrument instrument;
+                                        instrument.id = element.getValue(CCAPI_INSTRUMENT);
+                                        instrument.base = element.getValue(CCAPI_BASE_ASSET);
+                                        instrument.quote = element.getValue(CCAPI_QUOTE_ASSET);
 
-                                std::string qty_inc = element.getValue(CCAPI_ORDER_QUANTITY_INCREMENT);
-                                if (!qty_inc.empty()) { try { instrument.step_size = std::stod(qty_inc); } catch(...) {} }
+                                        std::string price_inc = element.getValue(CCAPI_ORDER_PRICE_INCREMENT);
+                                        if (!price_inc.empty()) { try { instrument.tick_size = std::stod(price_inc); } catch(...) {} }
 
-                                std::string qty_min = element.getValue(CCAPI_ORDER_QUANTITY_MIN);
-                                if (!qty_min.empty()) { try { instrument.min_size = std::stod(qty_min); } catch(...) {} }
+                                        std::string qty_inc = element.getValue(CCAPI_ORDER_QUANTITY_INCREMENT);
+                                        if (!qty_inc.empty()) { try { instrument.step_size = std::stod(qty_inc); } catch(...) {} }
 
-                                if (!instrument.base.empty() && !instrument.quote.empty()) {
-                                    instrument.symbol = instrument.base + "/" + instrument.quote;
-                                } else {
-                                    instrument.symbol = instrument.id;
+                                        std::string qty_min = element.getValue(CCAPI_ORDER_QUANTITY_MIN);
+                                        if (!qty_min.empty()) { try { instrument.min_size = std::stod(qty_min); } catch(...) {} }
+
+                                        if (!instrument.base.empty() && !instrument.quote.empty()) {
+                                            instrument.symbol = instrument.base + "/" + instrument.quote;
+                                        } else {
+                                            instrument.symbol = instrument.id;
+                                        }
+                                        instrument.type = kind;
+
+                                        for (const auto& pair : element.getNameValueMap()) {
+                                            instrument.info[std::string(pair.first)] = pair.second;
+                                        }
+
+                                        instruments.push_back(instrument);
+                                    }
+                                    received = true;
+                                } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                                     // Likely "currency not supported" or similar, ignore
+                                     received = true; // Break loop
                                 }
-                                instrument.type = "future";
-
-                                for (const auto& pair : element.getNameValueMap()) {
-                                    instrument.info[std::string(pair.first)] = pair.second;
-                                }
-
-                                instruments.push_back(instrument);
                             }
-                            responses++;
-                            if (responses >= 2) return instruments; // Got BTC and ETH
-                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                             // Ignore error, might just be one currency failing
                         }
                     }
+                    if (received) break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 }
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
         return instruments;
     }
