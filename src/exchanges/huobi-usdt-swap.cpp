@@ -52,7 +52,7 @@ public:
                                     instrument.symbol = instrument.id; // Fallback
                                 }
 
-                                instrument.type = "swap_linear";
+                                instrument.type = "swap";
 
                                 for (const auto& pair : element.getNameValueMap()) {
                                     instrument.info[std::string(pair.first)] = pair.second;
@@ -82,10 +82,6 @@ public:
         // Huobi USDT Swap (Linear)
         // Endpoint: /linear-swap-ex/market/history/kline
         ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "huobi-usdt-swap", "", "");
-        request.appendParam({
-            {CCAPI_HTTP_PATH, "/linear-swap-ex/market/history/kline"},
-            {CCAPI_HTTP_METHOD, "GET"}
-        });
 
         // Huobi period: 1min, 5min, 15min, 30min, 60min, 4hour, 1day, 1mon, 1week, 1year
         std::string period = "1min";
@@ -100,10 +96,17 @@ public:
         else if (timeframe == "1M") period = "1mon";
         else period = "1min";
 
+        std::string symbol = instrument_name;
+        if (symbol.find("-USDT") == std::string::npos) {
+            symbol += "-USDT";
+        }
+
+        std::string query = "contract_code=" + symbol + "&period=" + period + "&size=2000";
+
         request.appendParam({
-            {"contract_code", instrument_name},
-            {"period", period},
-            {"size", "2000"}
+            {CCAPI_HTTP_PATH, "/linear-swap-ex/market/history/kline"},
+            {CCAPI_HTTP_METHOD, "GET"},
+            {CCAPI_HTTP_QUERY_STRING, query}
         });
 
         session->sendRequest(request);
@@ -116,22 +119,24 @@ public:
                     for (const auto& message : event.getMessageList()) {
                         if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
                             for (const auto& element : message.getElementList()) {
-                                std::string json_content = element.getValue(CCAPI_HTTP_BODY);
-                                rapidjson::Document doc;
-                                doc.Parse(json_content.c_str());
+                                if (element.has(CCAPI_HTTP_BODY)) {
+                                    std::string json_content = element.getValue(CCAPI_HTTP_BODY);
+                                    rapidjson::Document doc;
+                                    doc.Parse(json_content.c_str());
 
-                                if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
-                                    for (const auto& kline : doc["data"].GetArray()) {
-                                        if (kline.IsObject()) {
-                                            Candle candle;
-                                            if (kline.HasMember("id") && kline["id"].IsInt64()) candle.timestamp = kline["id"].GetInt64() * 1000;
-                                            if (kline.HasMember("open") && kline["open"].IsNumber()) candle.open = kline["open"].GetDouble();
-                                            if (kline.HasMember("high") && kline["high"].IsNumber()) candle.high = kline["high"].GetDouble();
-                                            if (kline.HasMember("low") && kline["low"].IsNumber()) candle.low = kline["low"].GetDouble();
-                                            if (kline.HasMember("close") && kline["close"].IsNumber()) candle.close = kline["close"].GetDouble();
-                                            if (kline.HasMember("vol") && kline["vol"].IsNumber()) candle.volume = kline["vol"].GetDouble();
+                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
+                                        for (const auto& kline : doc["data"].GetArray()) {
+                                            if (kline.IsObject()) {
+                                                Candle candle;
+                                                if (kline.HasMember("id") && kline["id"].IsInt64()) candle.timestamp = kline["id"].GetInt64() * 1000;
+                                                if (kline.HasMember("open") && kline["open"].IsNumber()) candle.open = kline["open"].GetDouble();
+                                                if (kline.HasMember("high") && kline["high"].IsNumber()) candle.high = kline["high"].GetDouble();
+                                                if (kline.HasMember("low") && kline["low"].IsNumber()) candle.low = kline["low"].GetDouble();
+                                                if (kline.HasMember("close") && kline["close"].IsNumber()) candle.close = kline["close"].GetDouble();
+                                                if (kline.HasMember("vol") && kline["vol"].IsNumber()) candle.volume = kline["vol"].GetDouble();
 
-                                            candles.push_back(candle);
+                                                candles.push_back(candle);
+                                            }
                                         }
                                     }
                                 }
@@ -140,6 +145,16 @@ public:
                             std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
                                 return a.timestamp < b.timestamp;
                             });
+
+                            if (from_date > 0 || to_date > 0) {
+                                auto it = std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
+                                    if (from_date > 0 && c.timestamp < from_date) return true;
+                                    if (to_date > 0 && c.timestamp >= to_date) return true;
+                                    return false;
+                                });
+                                candles.erase(it, candles.end());
+                            }
+
                             return candles;
                         }
                     }

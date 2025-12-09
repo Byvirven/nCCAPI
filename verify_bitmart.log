@@ -1,0 +1,10 @@
+[36m==========================================[0m
+[36mTesting exchange: bitmart[0m
+Config: Duration=60m, Offset=1h
+[36m==========================================[0m
+Fetching instruments...
+[32mSuccess. Found 1424 instruments.[0m
+Selected Instrument: BTC/USDT (ID: BTC_USDT)
+Fetching historical candles (1m)...
+Range: 1765305047128 to 1765308647128 (60 mins)
+test_historical: /app/build/rapidjson/include/rapidjson/document.h:1645: int64_t rapidjson::GenericValue<Encoding, Allocator>::GetInt64() const [with Encoding = rapidjson::UTF8<>; Allocator = rapidjson::MemoryPoolAllocator<>; int64_t = long int]: Assertion `data_.f.flags & kInt64Flag' failed.

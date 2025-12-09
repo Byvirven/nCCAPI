@@ -2,12 +2,14 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <algorithm>
 
 #include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
 #include "ccapi_cpp/ccapi_macro.h"
+
 #include "rapidjson/document.h"
 
 namespace nccapi {
@@ -18,7 +20,11 @@ public:
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
-        ccapi::Request request(ccapi::Request::Operation::GET_INSTRUMENTS, "whitebit");
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "whitebit", "", "");
+        request.appendParam({
+            {CCAPI_HTTP_PATH, "/api/v4/public/markets"},
+            {CCAPI_HTTP_METHOD, "GET"}
+        });
 
         session->sendRequest(request);
 
@@ -28,36 +34,35 @@ public:
             for (const auto& event : events) {
                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
                     for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GET_INSTRUMENTS) {
+                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
                             for (const auto& element : message.getElementList()) {
-                                Instrument instrument;
-                                instrument.id = element.getValue(CCAPI_INSTRUMENT);
-                                instrument.base = element.getValue(CCAPI_BASE_ASSET);
-                                instrument.quote = element.getValue(CCAPI_QUOTE_ASSET);
+                                if (element.has(CCAPI_HTTP_BODY)) {
+                                    std::string json_content = element.getValue(CCAPI_HTTP_BODY);
+                                    rapidjson::Document doc;
+                                    doc.Parse(json_content.c_str());
 
-                                std::string price_inc = element.getValue(CCAPI_ORDER_PRICE_INCREMENT);
-                                if (!price_inc.empty()) { try { instrument.tick_size = std::stod(price_inc); } catch(...) {} }
+                                    if (!doc.HasParseError() && doc.IsArray()) {
+                                        for (const auto& item : doc.GetArray()) {
+                                            Instrument instrument;
+                                            if (item.HasMember("name")) {
+                                                instrument.id = item["name"].GetString();
+                                                instrument.symbol = instrument.id; // Usually e.g. BTC_USDT
 
-                                std::string qty_inc = element.getValue(CCAPI_ORDER_QUANTITY_INCREMENT);
-                                if (!qty_inc.empty()) { try { instrument.step_size = std::stod(qty_inc); } catch(...) {} }
+                                                // Try to split
+                                                size_t u = instrument.id.find('_');
+                                                if (u != std::string::npos) {
+                                                    instrument.base = instrument.id.substr(0, u);
+                                                    instrument.quote = instrument.id.substr(u+1);
+                                                }
+                                            }
+                                            instrument.type = "spot"; // WhiteBIT generic markets are spot
 
-                                std::string qty_min = element.getValue(CCAPI_ORDER_QUANTITY_MIN);
-                                if (!qty_min.empty()) { try { instrument.min_size = std::stod(qty_min); } catch(...) {} }
-
-                                if (!instrument.base.empty() && !instrument.quote.empty()) {
-                                    instrument.symbol = instrument.base + "/" + instrument.quote;
-                                } else {
-                                    instrument.symbol = instrument.id;
+                                            instruments.push_back(instrument);
+                                        }
+                                        return instruments;
+                                    }
                                 }
-                                instrument.type = "spot";
-
-                                for (const auto& pair : element.getNameValueMap()) {
-                                    instrument.info[std::string(pair.first)] = pair.second;
-                                }
-
-                                instruments.push_back(instrument);
                             }
-                            return instruments;
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
                             return instruments;
                         }
@@ -74,11 +79,12 @@ public:
                                                int64_t from_date,
                                                int64_t to_date) {
         std::vector<Candle> candles;
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "whitebit", "", "");
 
-        // Use GENERIC_PUBLIC_REQUEST for WhiteBIT
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "whitebit", "", "GET_KLINE");
+        // WhiteBIT: /api/v1/public/kline (Older) or /api/v4/public/kline
+        // V4: GET /api/v4/public/kline
+        // Params: market, interval, limit, start, end
 
-        // WhiteBIT timeframe: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M
         std::string interval = "1m";
         if (timeframe == "1m") interval = "1m";
         else if (timeframe == "3m") interval = "3m";
@@ -95,16 +101,15 @@ public:
         else if (timeframe == "3d") interval = "3d";
         else if (timeframe == "1w") interval = "1w";
         else if (timeframe == "1M") interval = "1M";
-        else interval = "1m";
+
+        std::string query = "market=" + instrument_name + "&interval=" + interval + "&limit=1000";
+        if (from_date > 0) query += "&start=" + std::to_string(from_date / 1000);
+        if (to_date > 0) query += "&end=" + std::to_string(to_date / 1000);
 
         request.appendParam({
             {CCAPI_HTTP_PATH, "/api/v1/public/kline"},
             {CCAPI_HTTP_METHOD, "GET"},
-            {"market", instrument_name},
-            {"interval", interval},
-            {"start", std::to_string(from_date / 1000)}, // Seconds
-            {"end", std::to_string(to_date / 1000)},
-            {"limit", "1000"}
+            {CCAPI_HTTP_QUERY_STRING, query}
         });
 
         session->sendRequest(request);
@@ -118,36 +123,57 @@ public:
                         if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
                             for (const auto& element : message.getElementList()) {
                                 if (element.has(CCAPI_HTTP_BODY)) {
-                                    std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                    std::string json_content = element.getValue(CCAPI_HTTP_BODY);
                                     rapidjson::Document doc;
-                                    doc.Parse(json_str.c_str());
+                                    doc.Parse(json_content.c_str());
 
-                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("result")) {
-                                        const auto& result = doc["result"];
-                                        if (result.IsArray()) {
-                                            for (const auto& item : result.GetArray()) {
-                                                // [time, open, close, high, low, volume]
-                                                if (item.IsArray() && item.Size() >= 6) {
-                                                    Candle candle;
-                                                    candle.timestamp = (int64_t)item[0].GetInt64() * 1000;
-                                                    candle.open = std::stod(item[1].GetString());
-                                                    candle.close = std::stod(item[2].GetString());
-                                                    candle.high = std::stod(item[3].GetString());
-                                                    candle.low = std::stod(item[4].GetString());
-                                                    candle.volume = std::stod(item[5].GetString());
+                                    // WhiteBIT returns: { "result": [ [time, open, close, high, low, vol_base, vol_quote], ... ] }
+                                    // Wait, V4 might be different. Let's check V1 structure or V4.
+                                    // V4 Example: "result": [ [ 1594242960, "9246.06", "9246.06", "9246.06", "9246.06", "0", "0" ] ]
+                                    // But sometimes it's just array of array without "result" wrapper?
+                                    // The docs say: { "result": [...] } but some endpoints return [...]
 
-                                                    candles.push_back(candle);
-                                                }
+                                    const rapidjson::Value* rows = nullptr;
+                                    if (!doc.HasParseError()) {
+                                        if (doc.IsArray()) rows = &doc;
+                                        else if (doc.IsObject() && doc.HasMember("result") && doc["result"].IsArray()) rows = &doc["result"];
+                                        else if (doc.IsObject() && doc.HasMember("code")) {
+                                            // Error
+                                            std::cout << "WhiteBIT Error: " << json_content << std::endl;
+                                        }
+                                    }
+
+                                    if (rows) {
+                                        for (const auto& item : rows->GetArray()) {
+                                            if (item.IsArray() && item.Size() >= 6) {
+                                                Candle candle;
+                                                candle.timestamp = static_cast<uint64_t>(item[0].GetInt64()) * 1000;
+                                                candle.open = std::stod(item[1].GetString());
+                                                candle.close = std::stod(item[2].GetString()); // Open, Close
+                                                candle.high = std::stod(item[3].GetString());
+                                                candle.low = std::stod(item[4].GetString());
+                                                candle.volume = std::stod(item[5].GetString()); // Base vol
+
+                                                candles.push_back(candle);
                                             }
-                                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                                return a.timestamp < b.timestamp;
-                                            });
-                                            return candles;
                                         }
                                     }
                                 }
                             }
-                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+
+                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                                return a.timestamp < b.timestamp;
+                            });
+
+                            if (from_date > 0 || to_date > 0) {
+                                auto it = std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
+                                    if (from_date > 0 && c.timestamp < from_date) return true;
+                                    if (to_date > 0 && c.timestamp >= to_date) return true;
+                                    return false;
+                                });
+                                candles.erase(it, candles.end());
+                            }
+
                             return candles;
                         }
                     }

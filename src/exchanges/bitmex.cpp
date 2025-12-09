@@ -180,6 +180,16 @@ public:
                             std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
                                 return a.timestamp < b.timestamp;
                             });
+
+                            if (from_date > 0 || to_date > 0) {
+                                auto it = std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
+                                    if (from_date > 0 && c.timestamp < from_date) return true;
+                                    if (to_date > 0 && c.timestamp >= to_date) return true;
+                                    return false;
+                                });
+                                candles.erase(it, candles.end());
+                            }
+
                             return candles;
                         }
                     }

@@ -62,6 +62,7 @@ public:
                             }
                             return instruments;
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                            std::cout << "[DEBUG] Bitmart Error: " << message.toString() << std::endl;
                             return instruments;
                         }
                     }
@@ -78,10 +79,6 @@ public:
                                                int64_t to_date) {
         std::vector<Candle> candles;
         ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitmart", "", "");
-        request.appendParam({
-            {CCAPI_HTTP_PATH, "/spot/quotation/v3/klines"},
-            {CCAPI_HTTP_METHOD, "GET"}
-        });
 
         // Bitmart API: step in minutes.
         // 1, 3, 5, 15, 30, 45, 60, 120, 180, 240, 1440, 10080, 43200
@@ -100,11 +97,15 @@ public:
         else if (timeframe == "1w") step = 10080;
         else if (timeframe == "1M") step = 43200;
 
+        std::string query = "symbol=" + instrument_name + "&step=" + std::to_string(step);
+        if (from_date > 0) query += "&after=" + std::to_string(from_date / 1000);
+        if (to_date > 0) query += "&before=" + std::to_string(to_date / 1000);
+
+        std::string path = "/spot/quotation/v3/klines?" + query;
+
         request.appendParam({
-            {"symbol", instrument_name},
-            {"step", std::to_string(step)},
-            {"before", std::to_string(to_date / 1000)},
-            {"after", std::to_string(from_date / 1000)}
+            {CCAPI_HTTP_PATH, path},
+            {CCAPI_HTTP_METHOD, "GET"}
         });
 
         session->sendRequest(request);
@@ -117,22 +118,29 @@ public:
                     for (const auto& message : event.getMessageList()) {
                         if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
                             for (const auto& element : message.getElementList()) {
-                                std::string json_content = element.getValue(CCAPI_HTTP_BODY);
-                                rapidjson::Document doc;
-                                doc.Parse(json_content.c_str());
+                                if (element.has(CCAPI_HTTP_BODY)) {
+                                    std::string json_content = element.getValue(CCAPI_HTTP_BODY);
+                                    rapidjson::Document doc;
+                                    doc.Parse(json_content.c_str());
 
-                                if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
-                                    const auto& data = doc["data"];
-                                    for (const auto& kline : data.GetArray()) {
-                                        if (kline.IsArray() && kline.Size() >= 7) {
-                                            Candle candle;
-                                            candle.timestamp = static_cast<uint64_t>(kline[0].GetInt64()) * 1000;
-                                            candle.open = std::stod(kline[1].GetString());
-                                            candle.high = std::stod(kline[2].GetString());
-                                            candle.low = std::stod(kline[3].GetString());
-                                            candle.close = std::stod(kline[4].GetString());
-                                            candle.volume = std::stod(kline[5].GetString());
-                                            candles.push_back(candle);
+                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
+                                        const auto& data = doc["data"];
+                                        for (const auto& kline : data.GetArray()) {
+                                            if (kline.IsArray() && kline.Size() >= 7) {
+                                                Candle candle;
+                                                // Bitmart returns [timestamp (sec), open, high, low, close, volume, ...]
+                                                // Timestamp might be int or double
+                                                if (kline[0].IsInt64()) candle.timestamp = static_cast<uint64_t>(kline[0].GetInt64()) * 1000;
+                                                else if (kline[0].IsDouble()) candle.timestamp = static_cast<uint64_t>(kline[0].GetDouble()) * 1000;
+                                                else continue;
+
+                                                candle.open = std::stod(kline[1].GetString());
+                                                candle.high = std::stod(kline[2].GetString());
+                                                candle.low = std::stod(kline[3].GetString());
+                                                candle.close = std::stod(kline[4].GetString());
+                                                candle.volume = std::stod(kline[5].GetString());
+                                                candles.push_back(candle);
+                                            }
                                         }
                                     }
                                 }

@@ -9,20 +9,10 @@
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
 #include "ccapi_cpp/ccapi_macro.h"
+
 #include "rapidjson/document.h"
 
 namespace nccapi {
-
-namespace {
-    int64_t get_timeframe_ms(const std::string& timeframe) {
-        if (timeframe == "1m") return 60000;
-        if (timeframe == "5m") return 300000;
-        if (timeframe == "15m") return 900000;
-        if (timeframe == "1h") return 3600000;
-        // ...
-        return 60000;
-    }
-}
 
 class Bitfinex::Impl {
 public:
@@ -46,6 +36,12 @@ public:
                                 instrument.id = element.getValue(CCAPI_INSTRUMENT);
                                 instrument.base = element.getValue(CCAPI_BASE_ASSET);
                                 instrument.quote = element.getValue(CCAPI_QUOTE_ASSET);
+
+                                std::string price_inc = element.getValue(CCAPI_ORDER_PRICE_INCREMENT);
+                                if (!price_inc.empty()) { try { instrument.tick_size = std::stod(price_inc); } catch(...) {} }
+
+                                std::string qty_inc = element.getValue(CCAPI_ORDER_QUANTITY_INCREMENT);
+                                if (!qty_inc.empty()) { try { instrument.step_size = std::stod(qty_inc); } catch(...) {} }
 
                                 std::string qty_min = element.getValue(CCAPI_ORDER_QUANTITY_MIN);
                                 if (!qty_min.empty()) { try { instrument.min_size = std::stod(qty_min); } catch(...) {} }
@@ -80,8 +76,11 @@ public:
                                                int64_t from_date,
                                                int64_t to_date) {
         std::vector<Candle> candles;
+        // Bitfinex API: /v2/candles/trade:1m:tBTCUSD/hist
+        // Params: limit, start, end, sort
 
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitfinex", "", "");
+        std::string symbol = instrument_name;
+        if (symbol.size() > 0 && symbol[0] != 't') symbol = "t" + symbol; // Ensure 't' prefix for trading pairs
 
         std::string tf = "1m";
         if (timeframe == "1m") tf = "1m";
@@ -94,25 +93,20 @@ public:
         else if (timeframe == "12h") tf = "12h";
         else if (timeframe == "1d") tf = "1D";
         else if (timeframe == "1w") tf = "7D";
+        else if (timeframe == "2w") tf = "14D";
         else if (timeframe == "1M") tf = "1M";
-        else tf = "1m";
 
-        std::string path = "/v2/candles/trade:" + tf + ":" + instrument_name + "/hist";
+        std::string path = "/v2/candles/trade:" + tf + ":" + symbol + "/hist";
 
-        // Align start time to timeframe to avoid missing the first candle if start > candle_start
-        int64_t tf_ms = get_timeframe_ms(timeframe);
-        int64_t adjusted_from = from_date;
-        if (adjusted_from > 0) {
-            adjusted_from = (adjusted_from / tf_ms) * tf_ms;
-        }
+        std::string query = "limit=1000&sort=1"; // sort=1 for oldest first
+        if (from_date > 0) query += "&start=" + std::to_string(from_date);
+        if (to_date > 0) query += "&end=" + std::to_string(to_date);
 
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitfinex", "", "");
         request.appendParam({
             {CCAPI_HTTP_PATH, path},
             {CCAPI_HTTP_METHOD, "GET"},
-            {"limit", "1000"},
-            {"start", std::to_string(adjusted_from)}, // ms
-            {"end", std::to_string(to_date)},
-            {"sort", "1"} // old to new
+            {CCAPI_HTTP_QUERY_STRING, query}
         });
 
         session->sendRequest(request);
@@ -126,14 +120,15 @@ public:
                         if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
                             for (const auto& element : message.getElementList()) {
                                 if (element.has(CCAPI_HTTP_BODY)) {
-                                    std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                    std::string json_content = element.getValue(CCAPI_HTTP_BODY);
                                     rapidjson::Document doc;
-                                    doc.Parse(json_str.c_str());
+                                    doc.Parse(json_content.c_str());
 
                                     if (!doc.HasParseError() && doc.IsArray()) {
                                         for (const auto& item : doc.GetArray()) {
                                             if (item.IsArray() && item.Size() >= 6) {
                                                 Candle candle;
+                                                // [ MTS, OPEN, CLOSE, HIGH, LOW, VOLUME ]
                                                 candle.timestamp = item[0].GetInt64();
                                                 candle.open = item[1].GetDouble();
                                                 candle.close = item[2].GetDouble();
@@ -147,25 +142,24 @@ public:
                                     }
                                 }
                             }
-                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+
+                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                                return a.timestamp < b.timestamp;
+                            });
+
+                            if (from_date > 0 || to_date > 0) {
+                                auto it = std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
+                                    if (from_date > 0 && c.timestamp < from_date) return true;
+                                    if (to_date > 0 && c.timestamp >= to_date) return true;
+                                    return false;
+                                });
+                                candles.erase(it, candles.end());
+                            }
+
                             return candles;
                         }
                     }
                 }
-            }
-            if (!candles.empty()) {
-                // Filter: we adjusted start time, so we might get one extra at the beginning if from_date was slightly later.
-                // But generally users want the candle that COVERS from_date if from_date is inclusive.
-                // Standard convention: returns candles with OPEN_TIME >= from_date.
-                // If we aligned from_date down, we get OPEN_TIME >= aligned_from.
-                // If aligned_from < from_date, we get a candle starting before from_date.
-                // We should keep it if the user intended "1 hour ago".
-                // So no strict filtering here.
-
-                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                    return a.timestamp < b.timestamp;
-                });
-                return candles;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
