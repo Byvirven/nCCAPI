@@ -55,3 +55,13 @@ target_link_libraries(test_structure nccapi OpenSSL::SSL OpenSSL::Crypto Threads
 # Test Historical
 add_executable(test_historical tests/test_historical.cpp)
 target_link_libraries(test_historical nccapi OpenSSL::SSL OpenSSL::Crypto Threads::Threads ZLIB::ZLIB dl)
+
+# Test Multi Exchange
+add_executable(multi_exchange tests/multi_exchange.cpp)
+target_link_libraries(multi_exchange OpenSSL::SSL OpenSSL::Crypto Threads::Threads ZLIB::ZLIB dl)
+if (TARGET boost)
+    add_dependencies(multi_exchange boost)
+endif()
+if (TARGET rapidjson)
+    add_dependencies(multi_exchange rapidjson)
+endif()

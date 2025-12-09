@@ -1,0 +1,33 @@
+========================================
+[START] Exchange: binance-us
+========================================
+[INFO] Fetching instruments...
+[INFO] Using GENERIC_PUBLIC_REQUEST for instruments
+[DEBUG] Path: /api/v3/exchangeInfo
+[DEBUG] Query:
+[INFO] Processing generic instruments...
+[DEBUG] HTTP Status: 200
+[DEBUG] Response length: 906248
+[DEBUG] Found 612 raw instruments
+[INFO] Found 255 instruments
+[DEBUG] Top 5:
+  1. BTCUSDT [BTC/USDT] Score: 160
+  2. BTCUSD [BTC/USD] Score: 155
+  3. ETHUSDT [ETH/USDT] Score: 150
+  4. BTCUSDC [BTC/USDC] Score: 150
+  5. ETHUSD [ETH/USD] Score: 145
+[INFO] Selected: BTCUSDT [BTC/USDT] Score: 160
+[INFO] Requesting candles via GENERIC_PUBLIC_REQUEST
+[DEBUG] Path: /api/v3/klines
+[DEBUG] Query: symbol=BTCUSDT&interval=1m&startTime=1765259998000&endTime=1765263658000&limit=60
+[INFO] Received 60 candles
+[RESULT] First: Time: 1765260000, O: 90128.74000000, H: 90128.74000000, L: 90128.74000000, C: 90128.74000000, V: 0.00000000
+[RESULT] Last:  Time: 1765263540, O: 90247.14000000, H: 90247.14000000, L: 90247.14000000, C: 90247.14000000, V: 0.00000000
+========================================
+[SUMMARY]
+  Exchange:       binance-us
+  Instruments:    255
+  Selected:       BTCUSDT
+  Candles:        60
+  Status:         SUCCESS (60/60)
+========================================

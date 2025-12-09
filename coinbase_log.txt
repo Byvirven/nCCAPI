@@ -1,0 +1,27 @@
+========================================
+[START] Exchange: coinbase
+========================================
+[INFO] Fetching instruments...
+[INFO] Processing instruments...
+[INFO] Found 593 instruments
+[DEBUG] Top 5:
+  1. BTC-USDT [BTC/USDT] Score: 160
+  2. BTC-USD [BTC/USD] Score: 155
+  3. ETH-USDT [ETH/USDT] Score: 150
+  4. BTC-USDC [BTC/USDC] Score: 150
+  5. ETH-USD [ETH/USD] Score: 145
+[INFO] Selected: ETH-USDT [ETH/USDT] Score: 150
+[INFO] Requesting candles via GENERIC_PUBLIC_REQUEST
+[DEBUG] Path: /products/ETH-USDT/candles
+[DEBUG] Query: granularity=60&start=1765260000&end=1765263660
+[INFO] Received 49 candles
+[RESULT] First: Time: 1765260060, O: 3107.92, H: 3107.92, L: 3107.92, C: 3107.92, V: 0.2
+[RESULT] Last:  Time: 1765263600, O: 3114.76, H: 3115.1, L: 3114.43, C: 3114.94, V: 0.52433739
+========================================
+[SUMMARY]
+  Exchange:       coinbase
+  Instruments:    593
+  Selected:       ETH-USDT
+  Candles:        49
+  Status:         PARTIAL (49/60)
+========================================

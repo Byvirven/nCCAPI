@@ -1,0 +1,27 @@
+========================================
+[START] Exchange: mexc
+========================================
+[INFO] Fetching instruments...
+[INFO] Processing instruments...
+[INFO] Found 2434 instruments
+[DEBUG] Top 5:
+  1. BTCUSDT [BTC/USDT] Score: 160
+  2. ETHUSDT [ETH/USDT] Score: 150
+  3. BTCUSDC [BTC/USDC] Score: 150
+  4. ETHUSDC [ETH/USDC] Score: 140
+  5. XRPUSDT [XRP/USDT] Score: 130
+[INFO] Selected: BTCUSDT [BTC/USDT] Score: 160
+[INFO] Requesting candles via GENERIC_PUBLIC_REQUEST
+[DEBUG] Path: /api/v3/klines
+[DEBUG] Query: symbol=BTCUSDT&interval=1m&startTime=1765260009000&endTime=1765263669000&limit=60
+[INFO] Received 60 candles
+[RESULT] First: Time: 1765260060, O: 89904.91, H: 89955.86, L: 89896.61, C: 89955.86, V: 1.88090764
+[RESULT] Last:  Time: 1765263600, O: 90166.85, H: 90179.86, L: 90157.73, C: 90157.74, V: 1.55224726
+========================================
+[SUMMARY]
+  Exchange:       mexc
+  Instruments:    2434
+  Selected:       BTCUSDT
+  Candles:        60
+  Status:         SUCCESS (60/60)
+========================================
