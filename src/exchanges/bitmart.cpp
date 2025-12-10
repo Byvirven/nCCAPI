@@ -101,13 +101,10 @@ public:
         if (from_date > 0) query += "&after=" + std::to_string(from_date / 1000);
         if (to_date > 0) query += "&before=" + std::to_string(to_date / 1000);
 
-        std::string path = "/spot/quotation/v3/klines";
-        std::string query_str = query;
-
         request.appendParam({
-            {CCAPI_HTTP_PATH, path},
+            {CCAPI_HTTP_PATH, "/spot/quotation/v3/klines"},
             {CCAPI_HTTP_METHOD, "GET"},
-            {CCAPI_HTTP_QUERY_STRING, query_str}
+            {CCAPI_HTTP_QUERY_STRING, query}
         });
 
         session->sendRequest(request);

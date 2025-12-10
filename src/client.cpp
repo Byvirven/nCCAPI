@@ -42,6 +42,7 @@ namespace nccapi {
 Client::Client() {
     // Instantiate Unified Session
     ccapi::SessionOptions options;
+    options.httpRequestTimeoutMilliseconds = 30000; // Increase default timeout to 30s
     ccapi::SessionConfigs configs;
     auto unifiedSession = std::make_shared<UnifiedSession>(options, configs);
 

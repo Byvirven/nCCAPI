@@ -1,0 +1,13 @@
+[36m==========================================[0m
+[36mTesting exchange: bitmart[0m
+Config: Duration=60m, Offset=1h
+[36m==========================================[0m
+Fetching instruments...
+[32mSuccess. Found 1425 instruments.[0m
+Selected Instrument: BTC/USDT (ID: BTC_USDT)
+Fetching historical candles (1m)...
+Range: 1765363375750 to 1765366975750 (60 mins)
+[DEBUG] Bitmart Testing Basic Request...
+[DEBUG] Bitmart Response Body: {"message":"OK","code":1000,"trace":"d86d3299-44b6-4599-92fa-fa940d8f81b5","data":{"symbols":["$NUT_...
+[DEBUG] Bitmart Basic Request (Symbols) Succeeded
+[33mWarning: Returned empty candle vector (might be inactive pair or API limitation).[0m
