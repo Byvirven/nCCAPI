@@ -62,7 +62,6 @@ public:
                             }
                             return instruments;
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                            std::cout << "[DEBUG] Bitmart Error: " << message.toString() << std::endl;
                             return instruments;
                         }
                     }
@@ -78,7 +77,8 @@ public:
                                                int64_t from_date,
                                                int64_t to_date) {
         std::vector<Candle> candles;
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitmart", "", "");
+        // Pass instrument_name to Request constructor
+        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitmart", instrument_name, "");
 
         // Bitmart API: step in minutes.
         // 1, 3, 5, 15, 30, 45, 60, 120, 180, 240, 1440, 10080, 43200
@@ -101,11 +101,13 @@ public:
         if (from_date > 0) query += "&after=" + std::to_string(from_date / 1000);
         if (to_date > 0) query += "&before=" + std::to_string(to_date / 1000);
 
-        std::string path = "/spot/quotation/v3/klines?" + query;
+        std::string path = "/spot/quotation/v3/klines";
+        std::string query_str = query;
 
         request.appendParam({
             {CCAPI_HTTP_PATH, path},
-            {CCAPI_HTTP_METHOD, "GET"}
+            {CCAPI_HTTP_METHOD, "GET"},
+            {CCAPI_HTTP_QUERY_STRING, query_str}
         });
 
         session->sendRequest(request);
