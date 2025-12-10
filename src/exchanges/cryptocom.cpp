@@ -41,42 +41,33 @@ public:
                                     rapidjson::Document doc;
                                     doc.Parse(json_content.c_str());
 
-                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("result")) {
-                                        const auto& result = doc["result"];
-                                        const rapidjson::Value* data = nullptr;
-                                        if (result.HasMember("data")) data = &result["data"];
-                                        else if (result.HasMember("instruments")) data = &result["instruments"];
+                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("result") && doc["result"].HasMember("instruments")) {
+                                        const auto& insts = doc["result"]["instruments"];
+                                        for (const auto& item : insts.GetArray()) {
+                                            Instrument instrument;
+                                            instrument.id = item["instrument_name"].GetString();
+                                            instrument.base = item["base_currency"].GetString();
+                                            instrument.quote = item["quote_currency"].GetString();
 
-                                        if (data && data->IsArray()) {
-                                            for (const auto& item : data->GetArray()) {
-                                                Instrument instrument;
-                                                if (item.HasMember("instrument_name")) instrument.id = item["instrument_name"].GetString();
-                                                else if (item.HasMember("symbol")) instrument.id = item["symbol"].GetString();
-                                                else continue;
-
-                                                if (item.HasMember("base_currency")) instrument.base = item["base_currency"].GetString();
-                                                if (item.HasMember("quote_currency")) instrument.quote = item["quote_currency"].GetString();
-
-                                                if (item.HasMember("price_decimals")) {
-                                                    int decimals = item["price_decimals"].GetInt();
-                                                    instrument.tick_size = std::pow(10.0, -decimals);
-                                                }
-                                                if (item.HasMember("quantity_decimals")) {
-                                                    int decimals = item["quantity_decimals"].GetInt();
-                                                    instrument.step_size = std::pow(10.0, -decimals);
-                                                }
-
-                                                if (!instrument.base.empty() && !instrument.quote.empty()) {
-                                                    instrument.symbol = instrument.base + "/" + instrument.quote;
-                                                } else {
-                                                    instrument.symbol = instrument.id;
-                                                }
-                                                instrument.type = "spot";
-
-                                                instruments.push_back(instrument);
+                                            if (item.HasMember("price_decimals")) {
+                                                int decimals = item["price_decimals"].GetInt();
+                                                instrument.tick_size = std::pow(10.0, -decimals);
                                             }
-                                            return instruments;
+                                            if (item.HasMember("quantity_decimals")) {
+                                                int decimals = item["quantity_decimals"].GetInt();
+                                                instrument.step_size = std::pow(10.0, -decimals);
+                                            }
+
+                                            if (!instrument.base.empty() && !instrument.quote.empty()) {
+                                                instrument.symbol = instrument.base + "/" + instrument.quote;
+                                            } else {
+                                                instrument.symbol = instrument.id;
+                                            }
+                                            instrument.type = "spot";
+
+                                            instruments.push_back(instrument);
                                         }
+                                        return instruments;
                                     }
                                 }
                             }
@@ -98,9 +89,6 @@ public:
         std::vector<Candle> candles;
         ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "cryptocom", "", "");
 
-        // Crypto.com generic path: /v2/public/get-candlestick
-        // Params in QUERY STRING for GET
-
         std::string period = "1m";
         if (timeframe == "1m") period = "1m";
         else if (timeframe == "5m") period = "5m";
@@ -116,14 +104,6 @@ public:
         else if (timeframe == "1M") period = "1M";
 
         std::string query = "instrument_name=" + instrument_name + "&timeframe=" + period;
-
-        // Crypto.com API doesn't support 'from'/'to' in simple candlestick endpoint?
-        // Wait, V2 API documentation says:
-        // GET /v2/public/get-candlestick?instrument_name=BTC_USDT&timeframe=5m
-        // It returns latest candles.
-        // Does it support pagination? No, it returns max 300.
-        // It implies this wrapper won't support full historical fetch without iteration if needed.
-        // But for testing 60 candles, it's fine.
 
         request.appendParam({
             {CCAPI_HTTP_PATH, "/v2/public/get-candlestick"},
@@ -152,17 +132,7 @@ public:
                                             if (item.IsObject()) {
                                                 Candle candle;
                                                 if (item.HasMember("t")) candle.timestamp = item["t"].GetInt64();
-                                                if (item.HasMember("o")) candle.open = std::stod(item["o"].GetString()); // Usually number but check
-                                                if (item.HasMember("h")) candle.high = std::stod(item["h"].GetString());
-                                                if (item.HasMember("l")) candle.low = std::stod(item["l"].GetString());
-                                                if (item.HasMember("c")) candle.close = std::stod(item["c"].GetString());
-                                                if (item.HasMember("v")) candle.volume = std::stod(item["v"].GetString()); // Number
 
-                                                // Wait, check type.
-                                                // Crypto.com: "o": 162.12 (number)
-                                                // I should handle both string and number
-
-                                                // Helper lambda
                                                 auto getVal = [](const rapidjson::Value& v) -> double {
                                                     if(v.IsString()) return std::stod(v.GetString());
                                                     if(v.IsDouble()) return v.GetDouble();
@@ -170,11 +140,11 @@ public:
                                                     return 0.0;
                                                 };
 
-                                                candle.open = getVal(item["o"]);
-                                                candle.high = getVal(item["h"]);
-                                                candle.low = getVal(item["l"]);
-                                                candle.close = getVal(item["c"]);
-                                                candle.volume = getVal(item["v"]);
+                                                if (item.HasMember("o")) candle.open = getVal(item["o"]);
+                                                if (item.HasMember("h")) candle.high = getVal(item["h"]);
+                                                if (item.HasMember("l")) candle.low = getVal(item["l"]);
+                                                if (item.HasMember("c")) candle.close = getVal(item["c"]);
+                                                if (item.HasMember("v")) candle.volume = getVal(item["v"]);
 
                                                 candles.push_back(candle);
                                             }
@@ -187,7 +157,6 @@ public:
                                 return a.timestamp < b.timestamp;
                             });
 
-                            // Client-side filtering if needed
                             if (from_date > 0 || to_date > 0) {
                                 auto it = std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
                                     if (from_date > 0 && c.timestamp < from_date) return true;

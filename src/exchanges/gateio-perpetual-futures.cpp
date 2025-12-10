@@ -137,7 +137,6 @@ public:
                             for (const auto& element : message.getElementList()) {
                                 if (element.has(CCAPI_HTTP_BODY)) {
                                     std::string json_str = element.getValue(CCAPI_HTTP_BODY);
-                                    std::cout << "[DEBUG] GateIO Response: " << json_str << std::endl;
                                     rapidjson::Document doc;
                                     doc.Parse(json_str.c_str());
 
