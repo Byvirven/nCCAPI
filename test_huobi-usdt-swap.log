@@ -1,8 +1,0 @@
-[36m==========================================[0m
-[36mTesting exchange: huobi-usdt-swap[0m
-[36m==========================================[0m
-Fetching instruments...
-[32mSuccess. Found 225 instruments.[0m
-Selected Instrument: DOGE (ID: DOGE)
-Fetching historical candles (1m)...
-[33mWarning: Returned empty candle vector (might be inactive pair or API limitation).[0m
