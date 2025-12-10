@@ -3,6 +3,7 @@
 #include <thread>
 #include <chrono>
 #include <algorithm>
+#include <cmath>
 
 #include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
@@ -20,11 +21,7 @@ public:
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "cryptocom", "", "");
-        request.appendParam({
-            {CCAPI_HTTP_PATH, "/v2/public/get-instruments"},
-            {CCAPI_HTTP_METHOD, "GET"}
-        });
+        ccapi::Request request(ccapi::Request::Operation::GET_INSTRUMENTS, "cryptocom");
 
         session->sendRequest(request);
 
@@ -34,43 +31,36 @@ public:
             for (const auto& event : events) {
                 if (event.getType() == ccapi::Event::Type::RESPONSE) {
                     for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                        if (message.getType() == ccapi::Message::Type::GET_INSTRUMENTS) {
                             for (const auto& element : message.getElementList()) {
-                                if (element.has(CCAPI_HTTP_BODY)) {
-                                    std::string json_content = element.getValue(CCAPI_HTTP_BODY);
-                                    rapidjson::Document doc;
-                                    doc.Parse(json_content.c_str());
+                                Instrument instrument;
+                                instrument.id = element.getValue(CCAPI_INSTRUMENT);
+                                instrument.base = element.getValue(CCAPI_BASE_ASSET);
+                                instrument.quote = element.getValue(CCAPI_QUOTE_ASSET);
 
-                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("result") && doc["result"].HasMember("instruments")) {
-                                        const auto& insts = doc["result"]["instruments"];
-                                        for (const auto& item : insts.GetArray()) {
-                                            Instrument instrument;
-                                            instrument.id = item["instrument_name"].GetString();
-                                            instrument.base = item["base_currency"].GetString();
-                                            instrument.quote = item["quote_currency"].GetString();
+                                std::string price_inc = element.getValue(CCAPI_ORDER_PRICE_INCREMENT);
+                                if (!price_inc.empty()) { try { instrument.tick_size = std::stod(price_inc); } catch(...) {} }
 
-                                            if (item.HasMember("price_decimals")) {
-                                                int decimals = item["price_decimals"].GetInt();
-                                                instrument.tick_size = std::pow(10.0, -decimals);
-                                            }
-                                            if (item.HasMember("quantity_decimals")) {
-                                                int decimals = item["quantity_decimals"].GetInt();
-                                                instrument.step_size = std::pow(10.0, -decimals);
-                                            }
+                                std::string qty_inc = element.getValue(CCAPI_ORDER_QUANTITY_INCREMENT);
+                                if (!qty_inc.empty()) { try { instrument.step_size = std::stod(qty_inc); } catch(...) {} }
 
-                                            if (!instrument.base.empty() && !instrument.quote.empty()) {
-                                                instrument.symbol = instrument.base + "/" + instrument.quote;
-                                            } else {
-                                                instrument.symbol = instrument.id;
-                                            }
-                                            instrument.type = "spot";
+                                std::string qty_min = element.getValue(CCAPI_ORDER_QUANTITY_MIN);
+                                if (!qty_min.empty()) { try { instrument.min_size = std::stod(qty_min); } catch(...) {} }
 
-                                            instruments.push_back(instrument);
-                                        }
-                                        return instruments;
-                                    }
+                                if (!instrument.base.empty() && !instrument.quote.empty()) {
+                                    instrument.symbol = instrument.base + "/" + instrument.quote;
+                                } else {
+                                    instrument.symbol = instrument.id;
                                 }
+                                instrument.type = "spot";
+
+                                for (const auto& pair : element.getNameValueMap()) {
+                                    instrument.info[std::string(pair.first)] = pair.second;
+                                }
+
+                                instruments.push_back(instrument);
                             }
+                            return instruments;
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
                             return instruments;
                         }
@@ -88,6 +78,9 @@ public:
                                                int64_t to_date) {
         std::vector<Candle> candles;
         ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "cryptocom", "", "");
+
+        // Crypto.com generic path: /v2/public/get-candlestick
+        // Params in QUERY STRING for GET
 
         std::string period = "1m";
         if (timeframe == "1m") period = "1m";
@@ -157,6 +150,7 @@ public:
                                 return a.timestamp < b.timestamp;
                             });
 
+                            // Client-side filtering if needed
                             if (from_date > 0 || to_date > 0) {
                                 auto it = std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
                                     if (from_date > 0 && c.timestamp < from_date) return true;
