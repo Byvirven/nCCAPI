@@ -29,10 +29,13 @@
     - **Bitmex / Kraken Futures** : Passage au parsing manuel (`GENERIC_PUBLIC_REQUEST`) pour éviter les crashs liés aux assertions JSON.
     - **Bitget Futures / GateIO Perpetual** : Correction de la récupération vide (0 paires) par itération des paramètres requis (`productType`, `settle`).
     - **Binance US** : Correction de l'erreur `-1104` et du crash de destruction (fixé via `session->stop()`).
+    - **Bitmart** : Correction de la récupération des bougies historiques (0 résultat) causée par un type de timestamp string au lieu de number dans l'API V3.
+    - **CMake** : Mise à jour du `CMakeLists.txt` vers la version 3.24 pour supporter correctement `DOWNLOAD_EXTRACT_TIMESTAMP` lors du téléchargement des dépendances (Boost/RapidJSON).
 - **Structure de Données** : Enrichissement de `Instrument` pour supporter les futures/options (`expiry`, `strike`, `settle`, `type`).
 - **Validation** :
     - Tests locaux de l'utilisateur confirmant le fonctionnement à 100% de tous les exchanges (y compris `binance`, `bybit`, etc. qui sont geobloqués en cloud).
     - Tests cloud validant les fixes de crash et l'architecture.
+    - Vérification complète de la compilation "from scratch" avec téléchargement automatique des dépendances.
 
 ## Prochaines Étapes
 - Implémenter les méthodes de Market Data (Ticker, OrderBook, Trades).

@@ -62,9 +62,10 @@ git submodule update --init --recursive
 
 ### System Requirements
 *   **C++17** compiler.
+*   **CMake 3.24+** (Required for dependency downloading behavior).
 *   **OpenSSL** (System installed, e.g., `libssl-dev` on Debian/Ubuntu).
-*   **Boost** (System installed or via `external/`).
-*   **RapidJSON** (Included in `external/`).
+*   **Boost** (System installed or automatically downloaded via CMake).
+*   **RapidJSON** (Automatically downloaded via CMake).
 
 ## Compilation
 
