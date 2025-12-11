@@ -9,3 +9,4 @@ analysis/
 *.a
 *.so
 *.o
+test_bitmart_debug

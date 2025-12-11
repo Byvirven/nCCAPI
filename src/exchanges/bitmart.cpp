@@ -131,6 +131,7 @@ public:
                                                 // Timestamp might be int or double
                                                 if (kline[0].IsInt64()) candle.timestamp = static_cast<uint64_t>(kline[0].GetInt64()) * 1000;
                                                 else if (kline[0].IsDouble()) candle.timestamp = static_cast<uint64_t>(kline[0].GetDouble()) * 1000;
+                                                else if (kline[0].IsString()) candle.timestamp = static_cast<uint64_t>(std::stoll(kline[0].GetString())) * 1000;
                                                 else continue;
 
                                                 candle.open = std::stod(kline[1].GetString());
