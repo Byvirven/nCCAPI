@@ -1,8 +1,0 @@
-[36m==========================================[0m
-[36mTesting exchange: huobi-coin-swap[0m
-[36m==========================================[0m
-Fetching instruments...
-[32mSuccess. Found 9 instruments.[0m
-Selected Instrument: DOT (ID: DOT)
-Fetching historical candles (1m)...
-[33mWarning: Returned empty candle vector (might be inactive pair or API limitation).[0m
