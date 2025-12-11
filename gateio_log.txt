@@ -1,0 +1,27 @@
+========================================
+[START] Exchange: gateio
+========================================
+[INFO] Fetching instruments...
+[INFO] Processing instruments...
+[INFO] Found 2494 instruments
+[DEBUG] Top 5:
+  1. BTC_USDT [BTC/USDT] Score: 160
+  2. ETH_USDT [ETH/USDT] Score: 150
+  3. BTC_USDC [BTC/USDC] Score: 150
+  4. ETH_USDC [ETH/USDC] Score: 140
+  5. BNB_USDT [BNB/USDT] Score: 130
+[INFO] Selected: BTC_USDT [BTC/USDT] Score: 160
+[INFO] Requesting candles via GENERIC_PUBLIC_REQUEST
+[DEBUG] Path: /api/v4/spot/candlesticks
+[DEBUG] Query: currency_pair=BTC_USDT&interval=1m&from=1765260016&to=1765263676&limit=60
+[INFO] Received 60 candles
+[RESULT] First: Time: 1765260120, O: 89972.3, H: 90002.7, L: 89967.9, C: 89982.4, V: 308434.40687920
+[RESULT] Last:  Time: 1765263660, O: 90162.5, H: 90162.5, L: 90138.4, C: 90138.5, V: 141490.16498540
+========================================
+[SUMMARY]
+  Exchange:       gateio
+  Instruments:    2494
+  Selected:       BTC_USDT
+  Candles:        60
+  Status:         SUCCESS (60/60)
+========================================

@@ -1,0 +1,27 @@
+========================================
+[START] Exchange: huobi-usdt-swap
+========================================
+[INFO] Fetching instruments...
+[INFO] Processing instruments...
+[INFO] Found 14 instruments
+[DEBUG] Top 5:
+  1. BTC [BTC/] Score: 110
+  2. ETH [ETH/] Score: 100
+  3. XRP [XRP/] Score: 80
+  4. BNB [BNB/] Score: 80
+  5. SOL [SOL/] Score: 80
+[INFO] Selected: ETH [ETH/] Score: 100
+[INFO] Requesting candles via GENERIC_PUBLIC_REQUEST
+[DEBUG] Path: /linear-swap-ex/market/history/kline
+[DEBUG] Query: contract_code=ETH-USDT&period=1min&size=60
+[INFO] Received 60 candles
+[RESULT] First: Time: 1765260120, O: 3109.3, H: 3109.56, L: 3108.7, C: 3108.76, V: 1546
+[RESULT] Last:  Time: 1765263660, O: 3113.37, H: 3113.37, L: 3112.53, C: 3112.53, V: 802
+========================================
+[SUMMARY]
+  Exchange:       huobi-usdt-swap
+  Instruments:    14
+  Selected:       ETH
+  Candles:        60
+  Status:         SUCCESS (60/60)
+========================================

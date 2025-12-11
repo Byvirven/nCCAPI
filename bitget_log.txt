@@ -1,0 +1,27 @@
+========================================
+[START] Exchange: bitget
+========================================
+[INFO] Fetching instruments...
+[INFO] Processing instruments...
+[INFO] Found 728 instruments
+[DEBUG] Top 5:
+  1. BTCUSDT [BTC/USDT] Score: 160
+  2. ETHUSDT [ETH/USDT] Score: 150
+  3. BTCUSDC [BTC/USDC] Score: 150
+  4. ETHUSDC [ETH/USDC] Score: 140
+  5. BNBUSDT [BNB/USDT] Score: 130
+[INFO] Selected: ETHUSDT [ETH/USDT] Score: 150
+[INFO] Requesting candles via GENERIC_PUBLIC_REQUEST
+[DEBUG] Path: /api/v2/spot/market/candles
+[DEBUG] Query: symbol=ETHUSDT&granularity=1min&startTime=1765260018000&endTime=1765263678000&limit=60
+[INFO] Received 60 candles
+[RESULT] First: Time: 1765260120, O: 3110.3, H: 3110.39, L: 3109.5, C: 3109.69, V: 12.7085
+[RESULT] Last:  Time: 1765263660, O: 3114.43, H: 3114.44, L: 3113.2, C: 3114.1, V: 4.6795
+========================================
+[SUMMARY]
+  Exchange:       bitget
+  Instruments:    728
+  Selected:       ETHUSDT
+  Candles:        60
+  Status:         SUCCESS (60/60)
+========================================
