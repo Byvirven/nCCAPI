@@ -22,32 +22,32 @@ A standardized, header-only C++ wrapper for the [Crypto-Chassis CCAPI](https://g
 
 | Exchange | Status | Gap Risk (Sparse Data) |
 | :--- | :--- | :--- |
-| AscendEX | ✅ | |
+| AscendEX | ✅ | ⚠️ Yes |
 | Binance | ✅ | |
 | Binance US | ✅ | |
 | Binance Futures | ✅ | |
 | Bitfinex | ✅ | ⚠️ Yes |
 | Bitget | ✅ | |
 | Bitget Futures | ✅ | |
-| Bitmart | ✅ | |
+| Bitmart | ✅ | ⚠️ Yes |
 | BitMEX | ✅ | |
 | Bitstamp | ✅ | ⚠️ Yes |
 | Bybit | ✅ | |
 | Coinbase | ✅ | ⚠️ Yes |
-| Crypto.com | ✅ | |
-| Deribit | ✅ | |
-| Gate.io | ✅ | |
-| Gate.io Perpetual | ✅ | |
+| Crypto.com | ✅ | ⚠️ Yes |
+| Deribit | ✅ | ⚠️ Yes |
+| Gate.io | ✅ | ⚠️ Yes |
+| Gate.io Perpetual | ✅ | ⚠️ Yes |
 | Gemini | ✅ | ⚠️ Yes |
 | Huobi | ✅ | |
 | Kraken | ✅ | ⚠️ Yes |
 | Kraken Futures | ✅ | |
 | KuCoin | ✅ | |
 | KuCoin Futures | ✅ | |
-| MEXC | ✅ | |
-| MEXC Futures | ✅ | |
+| MEXC | ✅ | ⚠️ Yes |
+| MEXC Futures | ✅ | ⚠️ Yes |
 | OKX | ✅ | |
-| WhiteBIT | ✅ | |
+| WhiteBIT | ✅ | ⚠️ Yes |
 
 ## Dependencies & Installation
 
