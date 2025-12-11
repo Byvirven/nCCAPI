@@ -34,6 +34,24 @@ namespace {
         if (timeframe == "1d") return 86400000;
         return 60000;
     }
+
+    std::string url_encode(const std::string &value) {
+        std::ostringstream escaped;
+        escaped.fill('0');
+        escaped << std::hex;
+
+        for (std::string::const_iterator i = value.begin(), n = value.end(); i != n; ++i) {
+            std::string::value_type c = (*i);
+            if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+                escaped << c;
+                continue;
+            }
+            escaped << std::uppercase;
+            escaped << '%' << std::setw(2) << int((unsigned char) c);
+            escaped << std::nouppercase;
+        }
+        return escaped.str();
+    }
 }
 
 class Coinbase::Impl {
@@ -127,18 +145,20 @@ public:
             adjusted_from = (adjusted_from / tf_ms) * tf_ms;
         }
 
+        std::string query_string = "granularity=" + granularity;
+
+        if (adjusted_from > 0) {
+            query_string += "&start=" + url_encode(timestamp_to_iso8601(adjusted_from));
+        }
+        if (to_date > 0) {
+             query_string += "&end=" + url_encode(timestamp_to_iso8601(to_date));
+        }
+
         std::map<std::string, std::string> params = {
             {CCAPI_HTTP_PATH, path},
             {CCAPI_HTTP_METHOD, "GET"},
-            {"granularity", granularity}
+            {CCAPI_HTTP_QUERY_STRING, query_string}
         };
-
-        if (adjusted_from > 0) {
-            params["start"] = timestamp_to_iso8601(adjusted_from);
-        }
-        if (to_date > 0) {
-             params["end"] = timestamp_to_iso8601(to_date);
-        }
 
         request.appendParam(params);
 

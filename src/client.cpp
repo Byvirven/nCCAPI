@@ -149,16 +149,27 @@ std::vector<Candle> Client::get_historical_candles(const std::string& exchange_n
 
     auto candles = exchange->get_historical_candles(instrument_name, timeframe, from_date, actual_to_date);
 
+    // 1. Sort to ensure time order
+    std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+        return a.timestamp < b.timestamp;
+    });
+
+    // 2. Filter / Truncate irrelevant candles (intelligent truncation)
+    // Remove candles strictly outside the requested [from_date, to_date) range.
+    if (from_date > 0 || actual_to_date > 0) {
+        auto it = std::remove_if(candles.begin(), candles.end(), [from_date, actual_to_date](const Candle& c) {
+            if (from_date > 0 && c.timestamp < from_date) return true;
+            if (actual_to_date > 0 && c.timestamp >= actual_to_date) return true;
+            return false;
+        });
+        candles.erase(it, candles.end());
+    }
+
     // Gap Filling Logic (Zero-Gap Data Policy)
     if (candles.empty()) return candles;
 
     int64_t interval_ms = timeframe_to_ms(timeframe);
     if (interval_ms <= 0) return candles; // Cannot fill gaps if timeframe unknown
-
-    // Sort to ensure time order
-    std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-        return a.timestamp < b.timestamp;
-    });
 
     std::vector<Candle> filled_candles;
     filled_candles.reserve(candles.size() * 2); // Pre-allocate some space
