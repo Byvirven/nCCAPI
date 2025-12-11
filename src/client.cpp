@@ -2,6 +2,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <algorithm>
+#include <cctype>
 
 #include "nccapi/sessions/unified_session.hpp"
 
@@ -38,6 +39,30 @@
 #include "nccapi/exchanges/whitebit.hpp"
 
 namespace nccapi {
+
+namespace {
+    int64_t timeframe_to_ms(const std::string& timeframe) {
+        if (timeframe.empty()) return 0;
+        size_t unit_pos = 0;
+        while (unit_pos < timeframe.length() && std::isdigit(timeframe[unit_pos])) {
+            unit_pos++;
+        }
+        if (unit_pos == 0) return 0; // No digits
+
+        int64_t value = std::stoll(timeframe.substr(0, unit_pos));
+        std::string unit = timeframe.substr(unit_pos);
+
+        if (unit == "s") return value * 1000;
+        if (unit == "m") return value * 60 * 1000;
+        if (unit == "h") return value * 3600 * 1000;
+        if (unit == "d") return value * 86400 * 1000;
+        if (unit == "w") return value * 604800 * 1000;
+        if (unit == "M") return value * 2592000000LL; // 30 days approx
+        if (unit == "y") return value * 31536000000LL; // 365 days
+
+        return 0;
+    }
+}
 
 Client::Client() {
     // Instantiate Unified Session
@@ -122,7 +147,48 @@ std::vector<Candle> Client::get_historical_candles(const std::string& exchange_n
 
     // For from_date, if 0, we leave it to the exchange to decide the default lookback.
 
-    return exchange->get_historical_candles(instrument_name, timeframe, from_date, actual_to_date);
+    auto candles = exchange->get_historical_candles(instrument_name, timeframe, from_date, actual_to_date);
+
+    // Gap Filling Logic (Zero-Gap Data Policy)
+    if (candles.empty()) return candles;
+
+    int64_t interval_ms = timeframe_to_ms(timeframe);
+    if (interval_ms <= 0) return candles; // Cannot fill gaps if timeframe unknown
+
+    // Sort to ensure time order
+    std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+        return a.timestamp < b.timestamp;
+    });
+
+    std::vector<Candle> filled_candles;
+    filled_candles.reserve(candles.size() * 2); // Pre-allocate some space
+
+    filled_candles.push_back(candles[0]);
+
+    for (size_t i = 1; i < candles.size(); ++i) {
+        Candle prev = filled_candles.back(); // Copy by value to avoid reference invalidation on push_back
+        const auto& curr = candles[i];
+        int64_t diff = curr.timestamp - prev.timestamp;
+
+        // Check for gap (allow small tolerance, e.g. 10ms of interval, for slight time skews)
+        if (diff > interval_ms + 10) {
+             int64_t next_ts = prev.timestamp + interval_ms;
+             while (next_ts < curr.timestamp - (interval_ms / 2)) { // While we are not close enough to current
+                 Candle gap_candle;
+                 gap_candle.timestamp = next_ts;
+                 gap_candle.open = prev.close;
+                 gap_candle.high = prev.close;
+                 gap_candle.low = prev.close;
+                 gap_candle.close = prev.close;
+                 gap_candle.volume = 0.0;
+                 filled_candles.push_back(gap_candle);
+                 next_ts += interval_ms;
+             }
+        }
+        filled_candles.push_back(curr);
+    }
+
+    return filled_candles;
 }
 
 } // namespace nccapi
