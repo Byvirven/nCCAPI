@@ -10,3 +10,5 @@ analysis/
 *.so
 *.o
 test_bitmart_debug
+check_gaps
+check_gaps

@@ -1,0 +1,27 @@
+========================================
+[START] Exchange: okx
+========================================
+[INFO] Fetching instruments...
+[INFO] Processing instruments...
+[INFO] Found 636 instruments
+[DEBUG] Top 5:
+  1. BTC-USDT [BTC/USDT] Score: 160
+  2. BTC-USD [BTC/USD] Score: 155
+  3. BTC-USDC [BTC/USDC] Score: 150
+  4. ETH-USDT [ETH/USDT] Score: 150
+  5. ETH-USD [ETH/USD] Score: 145
+[INFO] Selected: BTC-USD [BTC/USD] Score: 155
+[INFO] Requesting candles via GENERIC_PUBLIC_REQUEST
+[DEBUG] Path: /api/v5/market/candles
+[DEBUG] Query: instId=BTC-USD&bar=1m&limit=60
+[INFO] Received 60 candles
+[RESULT] First: Time: 1765260060, O: 89926.9, H: 89984, L: 89926.5, C: 89983, V: 0.49839904
+[RESULT] Last:  Time: 1765263600, O: 90190.1, H: 90190.1, L: 90182, C: 90182, V: 0.02583221
+========================================
+[SUMMARY]
+  Exchange:       okx
+  Instruments:    636
+  Selected:       BTC-USD
+  Candles:        60
+  Status:         SUCCESS (60/60)
+========================================

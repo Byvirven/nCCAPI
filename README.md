@@ -18,34 +18,36 @@ A standardized, header-only C++ wrapper for the [Crypto-Chassis CCAPI](https://g
 
 ## Supported Exchanges
 
-| Exchange | Status |
-| :--- | :--- |
-| AscendEX | ✅ |
-| Binance | ✅ |
-| Binance US | ✅ |
-| Binance Futures | ✅ |
-| Bitfinex | ✅ |
-| Bitget | ✅ |
-| Bitget Futures | ✅ |
-| Bitmart | ✅ |
-| BitMEX | ✅ |
-| Bitstamp | ✅ |
-| Bybit | ✅ |
-| Coinbase | ✅ |
-| Crypto.com | ✅ |
-| Deribit | ✅ |
-| Gate.io | ✅ |
-| Gate.io Perpetual | ✅ |
-| Gemini | ✅ |
-| Huobi | ✅ |
-| Kraken | ✅ |
-| Kraken Futures | ✅ |
-| KuCoin | ✅ |
-| KuCoin Futures | ✅ |
-| MEXC | ✅ |
-| MEXC Futures | ✅ |
-| OKX | ✅ |
-| WhiteBIT | ✅ |
+**Note:** "Gap Risk" indicates exchanges that may return sparse historical data (omitting candles for periods with no trading volume), leading to potential time gaps in the requested range.
+
+| Exchange | Status | Gap Risk (Sparse Data) |
+| :--- | :--- | :--- |
+| AscendEX | ✅ | |
+| Binance | ✅ | |
+| Binance US | ✅ | |
+| Binance Futures | ✅ | |
+| Bitfinex | ✅ | ⚠️ Yes |
+| Bitget | ✅ | |
+| Bitget Futures | ✅ | |
+| Bitmart | ✅ | |
+| BitMEX | ✅ | |
+| Bitstamp | ✅ | ⚠️ Yes |
+| Bybit | ✅ | |
+| Coinbase | ✅ | ⚠️ Yes |
+| Crypto.com | ✅ | |
+| Deribit | ✅ | |
+| Gate.io | ✅ | |
+| Gate.io Perpetual | ✅ | |
+| Gemini | ✅ | ⚠️ Yes |
+| Huobi | ✅ | |
+| Kraken | ✅ | ⚠️ Yes |
+| Kraken Futures | ✅ | |
+| KuCoin | ✅ | |
+| KuCoin Futures | ✅ | |
+| MEXC | ✅ | |
+| MEXC Futures | ✅ | |
+| OKX | ✅ | |
+| WhiteBIT | ✅ | |
 
 ## Dependencies & Installation
 
