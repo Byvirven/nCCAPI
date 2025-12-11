@@ -1,0 +1,10 @@
+[36m==========================================[0m
+[36mTesting exchange: deribit[0m
+[36m==========================================[0m
+Fetching instruments...
+[32mSuccess. Found 4219 instruments.[0m
+[33mSpecific pair 'BTC' not found in instrument list. Trying fuzzy match...
+Fuzzy matched: BTC-9DEC25-82000-C
+Selected Instrument: BTC-9DEC25-82000-C (ID: BTC-9DEC25-82000-C)
+Fetching historical candles (1m)...
+[33mWarning: Returned empty candle vector (might be inactive pair or API limitation).[0m
