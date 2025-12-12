@@ -138,16 +138,21 @@ std::vector<Candle> Client::get_historical_candles(const std::string& exchange_n
 
     // Set default logic if needed, although generic default args handle it.
     // However, if the user passes 0, we can interpret it as defaults here if specific logic requires it.
-    // For now, pass directly.
     int64_t actual_to_date = to_date;
     if (actual_to_date <= 0) {
         actual_to_date = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
     }
 
-    // For from_date, if 0, we leave it to the exchange to decide the default lookback.
+    int64_t interval_ms = timeframe_to_ms(timeframe);
 
-    auto candles = exchange->get_historical_candles(instrument_name, timeframe, from_date, actual_to_date);
+    // Align request from_date to interval boundary to ensure we get the full first candle
+    int64_t aligned_from = from_date;
+    if (interval_ms > 0 && aligned_from > 0) {
+        aligned_from = (aligned_from / interval_ms) * interval_ms;
+    }
+
+    auto candles = exchange->get_historical_candles(instrument_name, timeframe, aligned_from, actual_to_date);
 
     // 1. Sort to ensure time order
     std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
@@ -156,9 +161,14 @@ std::vector<Candle> Client::get_historical_candles(const std::string& exchange_n
 
     // 2. Filter / Truncate irrelevant candles (intelligent truncation)
     // Remove candles strictly outside the requested [from_date, to_date) range.
-    if (from_date > 0 || actual_to_date > 0) {
-        auto it = std::remove_if(candles.begin(), candles.end(), [from_date, actual_to_date](const Candle& c) {
-            if (from_date > 0 && c.timestamp < from_date) return true;
+    // Note: We used aligned_from for the request to ensure we got the start bucket,
+    // but we filter using the aligned_from as well to keep that start bucket if it covers the request.
+
+    int64_t effective_from = aligned_from > 0 ? aligned_from : from_date;
+
+    if (effective_from > 0 || actual_to_date > 0) {
+        auto it = std::remove_if(candles.begin(), candles.end(), [effective_from, actual_to_date](const Candle& c) {
+            if (effective_from > 0 && c.timestamp < effective_from) return true;
             if (actual_to_date > 0 && c.timestamp >= actual_to_date) return true;
             return false;
         });
@@ -168,7 +178,6 @@ std::vector<Candle> Client::get_historical_candles(const std::string& exchange_n
     // Gap Filling Logic (Zero-Gap Data Policy)
     if (candles.empty()) return candles;
 
-    int64_t interval_ms = timeframe_to_ms(timeframe);
     if (interval_ms <= 0) return candles; // Cannot fill gaps if timeframe unknown
 
     std::vector<Candle> filled_candles;
