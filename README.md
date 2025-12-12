@@ -15,39 +15,38 @@ A standardized, header-only C++ wrapper for the [Crypto-Chassis CCAPI](https://g
     *   Standardized `Candle` struct for OHLCV data.
 *   **Header-Only Wrapper**: Easy integration (though dependencies must be linked).
 *   **Optimized Compilation**: Uses Pimpl and a **Unified Session** architecture to keep build times extremely low during development.
+*   **Zero-Gap Data Policy**: Automatically detects and fills gaps in historical candle data. Missing candles are filled by carrying forward the previous candle's close price (flat candle) with a volume of `0`, ensuring continuous timeframes regardless of exchange sparsity.
 
 ## Supported Exchanges
 
-**Note:** "Gap Risk" indicates exchanges that may return sparse historical data (omitting candles for periods with no trading volume), leading to potential time gaps in the requested range.
-
-| Exchange | Status | Gap Risk (Sparse Data) |
-| :--- | :--- | :--- |
-| AscendEX | ✅ | ⚠️ Yes |
-| Binance | ✅ | |
-| Binance US | ✅ | |
-| Binance Futures | ✅ | |
-| Bitfinex | ✅ | ⚠️ Yes |
-| Bitget | ✅ | |
-| Bitget Futures | ✅ | |
-| Bitmart | ✅ | ⚠️ Yes |
-| BitMEX | ✅ | |
-| Bitstamp | ✅ | ⚠️ Yes |
-| Bybit | ✅ | |
-| Coinbase | ✅ | ⚠️ Yes |
-| Crypto.com | ✅ | ⚠️ Yes |
-| Deribit | ✅ | ⚠️ Yes |
-| Gate.io | ✅ | ⚠️ Yes |
-| Gate.io Perpetual | ✅ | ⚠️ Yes |
-| Gemini | ✅ | ⚠️ Yes |
-| Huobi | ✅ | |
-| Kraken | ✅ | ⚠️ Yes |
-| Kraken Futures | ✅ | |
-| KuCoin | ✅ | |
-| KuCoin Futures | ✅ | |
-| MEXC | ✅ | ⚠️ Yes |
-| MEXC Futures | ✅ | ⚠️ Yes |
-| OKX | ✅ | |
-| WhiteBIT | ✅ | ⚠️ Yes |
+| Exchange | Status |
+| :--- | :--- |
+| AscendEX | ✅ |
+| Binance | ✅ |
+| Binance US | ✅ |
+| Binance Futures | ✅ |
+| Bitfinex | ✅ |
+| Bitget | ✅ |
+| Bitget Futures | ✅ |
+| Bitmart | ✅ |
+| BitMEX | ✅ |
+| Bitstamp | ✅ |
+| Bybit | ✅ |
+| Coinbase | ✅ |
+| Crypto.com | ✅ |
+| Deribit | ✅ |
+| Gate.io | ✅ |
+| Gate.io Perpetual | ✅ |
+| Gemini | ✅ |
+| Huobi | ✅ |
+| Kraken | ✅ |
+| Kraken Futures | ✅ |
+| KuCoin | ✅ |
+| KuCoin Futures | ✅ |
+| MEXC | ✅ |
+| MEXC Futures | ✅ |
+| OKX | ✅ |
+| WhiteBIT | ✅ |
 
 ## Dependencies & Installation
 
