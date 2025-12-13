@@ -3,11 +3,13 @@
 #include <thread>
 #include <chrono>
 #include <algorithm>
+#include <cmath>
 
 #include "nccapi/sessions/unified_session.hpp"
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
+#include "rapidjson/document.h"
 
 namespace nccapi {
 
@@ -17,11 +19,6 @@ public:
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
-        // Bybit V5 requires iterating categories for GET_INSTRUMENTS?
-        // Original logic likely iterated categories or just called GET_INSTRUMENTS if configured.
-        // Standard CCAPI GET_INSTRUMENTS for Bybit maps to /v5/market/instruments-info
-        // It requires "category" param.
-        // So we iterate categories using NATIVE GET_INSTRUMENTS.
         std::vector<std::string> categories = {"spot", "linear", "inverse", "option"};
 
         for (const auto& cat : categories) {
@@ -87,55 +84,159 @@ public:
                                                const std::string& timeframe,
                                                int64_t from_date,
                                                int64_t to_date) {
+        std::vector<Candle> all_candles;
+
+        // Priority categories to try. Linear (Perp) first, then Spot, then Inverse.
+        std::vector<std::string> categories_to_try = {"linear", "spot", "inverse"};
+
+        // If the user provided symbol suggests specific type, we might optimize, but for now try all.
+
+        for (const auto& category : categories_to_try) {
+            std::vector<Candle> cat_candles = fetch_candles_recursive(category, instrument_name, timeframe, from_date, to_date);
+            if (!cat_candles.empty()) {
+                // If we found data in this category, return it.
+                // Note: This assumes the symbol ID is valid for only one category OR we prefer the first match.
+                // Given standard usage, this is a reasonable heuristic.
+                return cat_candles;
+            }
+        }
+
+        return all_candles;
+    }
+
+    std::vector<Candle> fetch_candles_recursive(const std::string& category,
+                                              const std::string& instrument_name,
+                                              const std::string& timeframe,
+                                              int64_t from_date,
+                                              int64_t to_date) {
         std::vector<Candle> candles;
-        // Bybit V5 uses GET_HISTORICAL_CANDLESTICKS -> /v5/market/kline
-        ccapi::Request request(ccapi::Request::Operation::GET_HISTORICAL_CANDLESTICKS, "bybit", instrument_name);
+        int64_t current_from = from_date;
+        int interval_sec = timeframeToSeconds(timeframe);
+        int64_t interval_ms = interval_sec * 1000;
+        const int limit = 1000;
 
-        request.appendParam({
-            {CCAPI_CANDLESTICK_INTERVAL_SECONDS, std::to_string(timeframeToSeconds(timeframe))},
-            {CCAPI_START_TIME_SECONDS, std::to_string(from_date / 1000)},
-            {CCAPI_END_TIME_SECONDS, std::to_string(to_date / 1000)},
-            {CCAPI_LIMIT, "1000"}
-        });
+        int max_loops = 100; // Safety
 
-        session->sendRequest(request);
+        while (current_from < to_date) {
+            // Strict Window Chunking
+            // Calculate chunk end based on limit
+            int64_t chunk_end = current_from + (limit * interval_ms);
+            if (chunk_end > to_date) chunk_end = to_date;
 
-        auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
-            std::vector<ccapi::Event> events = session->getEventQueue().purge();
-            for (const auto& event : events) {
-                if (event.getType() == ccapi::Event::Type::RESPONSE) {
-                    for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GET_HISTORICAL_CANDLESTICKS ||
-                            message.getType() == ccapi::Message::Type::MARKET_DATA_EVENTS_CANDLESTICK) {
-                            for (const auto& element : message.getElementList()) {
-                                Candle candle;
-                                // Timestamp is in message.getTime() for native events
-                                candle.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                    message.getTime().time_since_epoch()).count();
+            ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bybit", "", "");
 
-                                candle.open = std::stod(element.getValue(CCAPI_OPEN_PRICE));
-                                candle.high = std::stod(element.getValue(CCAPI_HIGH_PRICE));
-                                candle.low = std::stod(element.getValue(CCAPI_LOW_PRICE));
-                                candle.close = std::stod(element.getValue(CCAPI_CLOSE_PRICE));
-                                candle.volume = std::stod(element.getValue(CCAPI_VOLUME));
+            // Map timeframe to Bybit interval format
+            std::string bybit_interval = timeframe;
+            if (timeframe == "1m") bybit_interval = "1";
+            else if (timeframe == "3m") bybit_interval = "3";
+            else if (timeframe == "5m") bybit_interval = "5";
+            else if (timeframe == "15m") bybit_interval = "15";
+            else if (timeframe == "30m") bybit_interval = "30";
+            else if (timeframe == "1h") bybit_interval = "60";
+            else if (timeframe == "2h") bybit_interval = "120";
+            else if (timeframe == "4h") bybit_interval = "240";
+            else if (timeframe == "6h") bybit_interval = "360";
+            else if (timeframe == "12h") bybit_interval = "720";
+            else if (timeframe == "1d") bybit_interval = "D";
+            else if (timeframe == "1w") bybit_interval = "W";
+            else if (timeframe == "1M") bybit_interval = "M";
 
-                                candles.push_back(candle);
+            std::string query_string = "category=" + category + "&symbol=" + instrument_name + "&interval=" + bybit_interval;
+            query_string += "&start=" + std::to_string(current_from);
+            query_string += "&end=" + std::to_string(chunk_end);
+            query_string += "&limit=" + std::to_string(limit);
+
+            request.appendParam({
+                {CCAPI_HTTP_METHOD, "GET"},
+                {CCAPI_HTTP_PATH, "/v5/market/kline"},
+                {CCAPI_HTTP_QUERY_STRING, query_string}
+            });
+
+            session->sendRequest(request);
+
+            std::vector<Candle> batch_candles;
+            bool success = false;
+
+            auto start = std::chrono::steady_clock::now();
+            while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+                std::vector<ccapi::Event> events = session->getEventQueue().purge();
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                                for (const auto& element : message.getElementList()) {
+                                    if (element.has(CCAPI_HTTP_BODY)) {
+                                        std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                        rapidjson::Document doc;
+                                        doc.Parse(json_str.c_str());
+
+                                        // Response: {"retCode":0, "result": {"list": [ ["ts", "o", "h", "l", "c", "v", "turnover"], ... ]}}
+                                        if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("retCode") && doc["retCode"].GetInt() == 0) {
+                                            if (doc.HasMember("result") && doc["result"].IsObject()) {
+                                                const auto& result = doc["result"];
+                                                if (result.HasMember("list") && result["list"].IsArray()) {
+                                                    for (const auto& arr : result["list"].GetArray()) {
+                                                        if (arr.IsArray() && arr.Size() >= 5) {
+                                                            Candle candle;
+                                                            candle.timestamp = std::stoll(arr[0].GetString());
+                                                            candle.open = std::stod(arr[1].GetString());
+                                                            candle.high = std::stod(arr[2].GetString());
+                                                            candle.low = std::stod(arr[3].GetString());
+                                                            candle.close = std::stod(arr[4].GetString());
+                                                            candle.volume = std::stod(arr[5].GetString());
+
+                                                            batch_candles.push_back(candle);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        success = true;
+                                    }
+                                }
+                            } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                                // std::cout << "[DEBUG] Bybit Error: " << message.toString() << std::endl;
+                                success = true;
                             }
-                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                            return candles;
                         }
                     }
                 }
+                if (success) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
-            if (!candles.empty()) {
-                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                    return a.timestamp < b.timestamp;
-                });
-                return candles;
+
+            if (batch_candles.empty()) {
+                break;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            // Bybit returns newest first (descending). We usually want ascending.
+            // But here we insert to a list.
+            // Let's sort this batch ascending first.
+            std::sort(batch_candles.begin(), batch_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+
+            candles.insert(candles.end(), batch_candles.begin(), batch_candles.end());
+
+            // Prepare for next iteration
+            // Since we used strict chunking [current_from, chunk_end], we move to chunk_end.
+            current_from = chunk_end;
+
+             if (--max_loops <= 0) break;
+             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
+
+        // Final Sort and Dedupe
+        if (!candles.empty()) {
+             std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+            auto last = std::unique(candles.begin(), candles.end(), [](const Candle& a, const Candle& b){
+                return a.timestamp == b.timestamp;
+            });
+            candles.erase(last, candles.end());
+        }
+
         return candles;
     }
 
