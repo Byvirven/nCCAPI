@@ -8,6 +8,9 @@
 #include "ccapi_cpp/ccapi_request.h"
 #include "ccapi_cpp/ccapi_event.h"
 #include "ccapi_cpp/ccapi_message.h"
+#include "ccapi_cpp/ccapi_macro.h"
+
+#include "rapidjson/document.h"
 
 namespace nccapi {
 
@@ -62,7 +65,7 @@ public:
                             }
                             return instruments;
                         } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                             return instruments;
+                            return instruments;
                         }
                     }
                 }
@@ -76,71 +79,126 @@ public:
                                                const std::string& timeframe,
                                                int64_t from_date,
                                                int64_t to_date) {
-        std::vector<Candle> candles;
-        ccapi::Request request(ccapi::Request::Operation::GET_HISTORICAL_CANDLESTICKS, "kucoin", instrument_name);
+        std::vector<Candle> all_candles;
 
-        request.appendParam({
-            {CCAPI_CANDLESTICK_INTERVAL_SECONDS, std::to_string(timeframeToSeconds(timeframe))},
-            {CCAPI_START_TIME_SECONDS, std::to_string(from_date / 1000)},
-            {CCAPI_END_TIME_SECONDS, std::to_string(to_date / 1000)}
-        });
+        int64_t current_from = from_date;
+        const int limit = 1500;
+        int max_loops = 100;
 
-        session->sendRequest(request);
+        // Kucoin timeframe: 1min, 3min, 5min, 15min, 30min, 1hour, 2hour, 4hour, 6hour, 8hour, 12hour, 1day, 1week
+        std::string type = "1min";
+        int64_t interval_ms = 60000;
+        if (timeframe == "1m") { type = "1min"; interval_ms = 60000; }
+        else if (timeframe == "5m") { type = "5min"; interval_ms = 300000; }
+        else if (timeframe == "15m") { type = "15min"; interval_ms = 900000; }
+        else if (timeframe == "30m") { type = "30min"; interval_ms = 1800000; }
+        else if (timeframe == "1h") { type = "1hour"; interval_ms = 3600000; }
+        else if (timeframe == "4h") { type = "4hour"; interval_ms = 14400000; }
+        else if (timeframe == "1d") { type = "1day"; interval_ms = 86400000; }
+        else if (timeframe == "1w") { type = "1week"; interval_ms = 604800000; }
 
-        auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
-            std::vector<ccapi::Event> events = session->getEventQueue().purge();
-            for (const auto& event : events) {
-                if (event.getType() == ccapi::Event::Type::RESPONSE) {
-                    for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GET_HISTORICAL_CANDLESTICKS ||
-                            message.getType() == ccapi::Message::Type::MARKET_DATA_EVENTS_CANDLESTICK) {
-                            for (const auto& element : message.getElementList()) {
-                                Candle candle;
-                                // Timestamp is in message.getTime() for native events
-                                candle.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                    message.getTime().time_since_epoch()).count();
+        while (current_from < to_date) {
+            int64_t chunk_end = current_from + ((int64_t)limit * interval_ms);
+            if (chunk_end > to_date) chunk_end = to_date;
 
-                                candle.open = std::stod(element.getValue(CCAPI_OPEN_PRICE));
-                                candle.high = std::stod(element.getValue(CCAPI_HIGH_PRICE));
-                                candle.low = std::stod(element.getValue(CCAPI_LOW_PRICE));
-                                candle.close = std::stod(element.getValue(CCAPI_CLOSE_PRICE));
-                                candle.volume = std::stod(element.getValue(CCAPI_VOLUME));
+            ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "kucoin", "", "");
 
-                                candles.push_back(candle);
+            std::string query = "symbol=" + instrument_name + "&type=" + type;
+            if (current_from > 0) query += "&startAt=" + std::to_string(current_from / 1000);
+            if (chunk_end > 0) query += "&endAt=" + std::to_string(chunk_end / 1000);
+
+            request.appendParam({
+                {CCAPI_HTTP_PATH, "/api/v1/market/candles"},
+                {CCAPI_HTTP_METHOD, "GET"},
+                {CCAPI_HTTP_QUERY_STRING, query}
+            });
+
+            session->sendRequest(request);
+
+            std::vector<Candle> batch_candles;
+            bool success = false;
+
+            auto start = std::chrono::steady_clock::now();
+            while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+                std::vector<ccapi::Event> events = session->getEventQueue().purge();
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                                for (const auto& element : message.getElementList()) {
+                                    if (element.has(CCAPI_HTTP_BODY)) {
+                                        std::string json_content = element.getValue(CCAPI_HTTP_BODY);
+                                        rapidjson::Document doc;
+                                        doc.Parse(json_content.c_str());
+
+                                        if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
+                                            for (const auto& kline : doc["data"].GetArray()) {
+                                                if (kline.IsArray() && kline.Size() >= 7) {
+                                                    Candle candle;
+                                                    // [ time, open, close, high, low, volume, turnover ]
+                                                    if (kline[0].IsString()) candle.timestamp = std::stoll(kline[0].GetString()) * 1000;
+                                                    if (kline[1].IsString()) candle.open = std::stod(kline[1].GetString());
+                                                    if (kline[3].IsString()) candle.high = std::stod(kline[3].GetString());
+                                                    if (kline[4].IsString()) candle.low = std::stod(kline[4].GetString());
+                                                    if (kline[2].IsString()) candle.close = std::stod(kline[2].GetString());
+                                                    if (kline[5].IsString()) candle.volume = std::stod(kline[5].GetString());
+
+                                                    batch_candles.push_back(candle);
+                                                }
+                                            }
+                                        }
+                                        success = true;
+                                    }
+                                }
+                            } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                                // std::cout << "[DEBUG] Kucoin Error: " << message.toString() << std::endl;
+                                success = true;
                             }
-                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                            return candles;
                         }
                     }
                 }
+                if (success) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
-            if (!candles.empty()) {
-                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
+
+            if (batch_candles.empty()) {
+                current_from = chunk_end;
+            } else {
+                std::sort(batch_candles.begin(), batch_candles.end(), [](const Candle& a, const Candle& b) {
                     return a.timestamp < b.timestamp;
                 });
-                return candles;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-        return candles;
-    }
 
-    int timeframeToSeconds(const std::string& timeframe) {
-        if (timeframe == "1m") return 60;
-        if (timeframe == "3m") return 180;
-        if (timeframe == "5m") return 300;
-        if (timeframe == "15m") return 900;
-        if (timeframe == "30m") return 1800;
-        if (timeframe == "1h") return 3600;
-        if (timeframe == "2h") return 7200;
-        if (timeframe == "4h") return 14400;
-        if (timeframe == "6h") return 21600;
-        if (timeframe == "8h") return 28800;
-        if (timeframe == "12h") return 43200;
-        if (timeframe == "1d") return 86400;
-        if (timeframe == "1w") return 604800;
-        return 60;
+                all_candles.insert(all_candles.end(), batch_candles.begin(), batch_candles.end());
+
+                current_from = chunk_end;
+            }
+
+            if (--max_loops <= 0) break;
+            if (current_from >= to_date) break;
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+
+        if (!all_candles.empty()) {
+             std::sort(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+            auto last = std::unique(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b){
+                return a.timestamp == b.timestamp;
+            });
+            all_candles.erase(last, all_candles.end());
+
+             if (from_date > 0 || to_date > 0) {
+                 auto it = std::remove_if(all_candles.begin(), all_candles.end(), [from_date, to_date](const Candle& c) {
+                     if (to_date > 0 && c.timestamp > to_date) return true;
+                     if (from_date > 0 && c.timestamp < from_date) return true;
+                     return false;
+                 });
+                 all_candles.erase(it, all_candles.end());
+             }
+        }
+
+        return all_candles;
     }
 
 private:

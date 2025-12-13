@@ -75,7 +75,7 @@ public:
                                                const std::string& timeframe,
                                                int64_t from_date,
                                                int64_t to_date) {
-        std::vector<Candle> candles;
+        std::vector<Candle> all_candles;
         // Bitfinex API: /v2/candles/trade:1m:tBTCUSD/hist
         // Params: limit, start, end, sort
 
@@ -98,72 +98,117 @@ public:
 
         std::string path = "/v2/candles/trade:" + tf + ":" + symbol + "/hist";
 
-        std::string query = "limit=1000&sort=1"; // sort=1 for oldest first
-        if (from_date > 0) query += "&start=" + std::to_string(from_date);
-        if (to_date > 0) query += "&end=" + std::to_string(to_date);
+        int64_t current_from = from_date;
+        const int limit = 10000; // Bitfinex max limit
+        int max_loops = 50;
 
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitfinex", "", "");
-        request.appendParam({
-            {CCAPI_HTTP_PATH, path},
-            {CCAPI_HTTP_METHOD, "GET"},
-            {CCAPI_HTTP_QUERY_STRING, query}
-        });
+        while (true) {
+            std::string query = "limit=" + std::to_string(limit) + "&sort=1"; // sort=1 for oldest first
+            if (current_from > 0) query += "&start=" + std::to_string(current_from);
+            if (to_date > 0) query += "&end=" + std::to_string(to_date);
 
-        session->sendRequest(request);
+            ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitfinex", "", "");
+            request.appendParam({
+                {CCAPI_HTTP_PATH, path},
+                {CCAPI_HTTP_METHOD, "GET"},
+                {CCAPI_HTTP_QUERY_STRING, query}
+            });
 
-        auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
-            std::vector<ccapi::Event> events = session->getEventQueue().purge();
-            for (const auto& event : events) {
-                if (event.getType() == ccapi::Event::Type::RESPONSE) {
-                    for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
-                            for (const auto& element : message.getElementList()) {
-                                if (element.has(CCAPI_HTTP_BODY)) {
-                                    std::string json_content = element.getValue(CCAPI_HTTP_BODY);
-                                    rapidjson::Document doc;
-                                    doc.Parse(json_content.c_str());
+            session->sendRequest(request);
 
-                                    if (!doc.HasParseError() && doc.IsArray()) {
-                                        for (const auto& item : doc.GetArray()) {
-                                            if (item.IsArray() && item.Size() >= 6) {
-                                                Candle candle;
-                                                // [ MTS, OPEN, CLOSE, HIGH, LOW, VOLUME ]
-                                                candle.timestamp = item[0].GetInt64();
-                                                candle.open = item[1].GetDouble();
-                                                candle.close = item[2].GetDouble();
-                                                candle.high = item[3].GetDouble();
-                                                candle.low = item[4].GetDouble();
-                                                candle.volume = item[5].GetDouble();
+            std::vector<Candle> batch_candles;
+            bool success = false;
 
-                                                candles.push_back(candle);
+            auto start = std::chrono::steady_clock::now();
+            while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+                std::vector<ccapi::Event> events = session->getEventQueue().purge();
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                                for (const auto& element : message.getElementList()) {
+                                    if (element.has(CCAPI_HTTP_BODY)) {
+                                        std::string json_content = element.getValue(CCAPI_HTTP_BODY);
+                                        rapidjson::Document doc;
+                                        doc.Parse(json_content.c_str());
+
+                                        if (!doc.HasParseError() && doc.IsArray()) {
+                                            for (const auto& item : doc.GetArray()) {
+                                                if (item.IsArray() && item.Size() >= 6) {
+                                                    Candle candle;
+                                                    // [ MTS, OPEN, CLOSE, HIGH, LOW, VOLUME ]
+                                                    candle.timestamp = item[0].GetInt64();
+                                                    candle.open = item[1].GetDouble();
+                                                    candle.close = item[2].GetDouble();
+                                                    candle.high = item[3].GetDouble();
+                                                    candle.low = item[4].GetDouble();
+                                                    candle.volume = item[5].GetDouble();
+
+                                                    batch_candles.push_back(candle);
+                                                }
                                             }
                                         }
+                                        success = true;
                                     }
                                 }
+                            } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                                // std::cout << "[DEBUG] Bitfinex Error: " << message.toString() << std::endl;
+                                success = true;
                             }
-
-                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                return a.timestamp < b.timestamp;
-                            });
-
-                            if (from_date > 0 || to_date > 0) {
-                                auto it = std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
-                                    if (from_date > 0 && c.timestamp < from_date) return true;
-                                    if (to_date > 0 && c.timestamp >= to_date) return true;
-                                    return false;
-                                });
-                                candles.erase(it, candles.end());
-                            }
-
-                            return candles;
                         }
                     }
                 }
+                if (success) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            if (batch_candles.empty()) {
+                break;
+            }
+
+            all_candles.insert(all_candles.end(), batch_candles.begin(), batch_candles.end());
+
+            int64_t last_ts = batch_candles.back().timestamp;
+            current_from = last_ts + 1; // Or interval? +1ms is safe for start param.
+
+            if (current_from >= to_date) {
+                break;
+            }
+
+            // If we got fewer than limit, we are done
+            if (batch_candles.size() < limit) {
+                break;
+            }
+
+            if (--max_loops <= 0) break;
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Bitfinex 30req/min = 0.5req/sec = 2000ms delay?
+            // 30 req/min is strict. 1 req every 2 seconds.
+            // I should increase sleep.
+            std::this_thread::sleep_for(std::chrono::milliseconds(2000));
         }
-        return candles;
+
+        // Final Sort and Filter
+        if (!all_candles.empty()) {
+            std::sort(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+            auto last = std::unique(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b){
+                return a.timestamp == b.timestamp;
+            });
+            all_candles.erase(last, all_candles.end());
+
+            if (from_date > 0 || to_date > 0) {
+                auto it = std::remove_if(all_candles.begin(), all_candles.end(), [from_date, to_date](const Candle& c) {
+                    if (from_date > 0 && c.timestamp < from_date) return true;
+                    if (to_date > 0 && c.timestamp > to_date) return true; // changed to > to_date (exclusive if desired? usually inclusive)
+                    return false;
+                });
+                all_candles.erase(it, all_candles.end());
+            }
+        }
+
+        return all_candles;
     }
 
 private:

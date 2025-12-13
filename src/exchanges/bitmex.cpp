@@ -121,12 +121,12 @@ public:
                                                const std::string& timeframe,
                                                int64_t from_date,
                                                int64_t to_date) {
-        std::vector<Candle> candles;
+        std::vector<Candle> all_candles;
 
-        // Manual Generic Request for BitMEX
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitmex", "", "");
+        int64_t current_from = from_date;
+        const int limit = 1000;
+        int max_loops = 50;
 
-        // Build Query String manually
         // Bitmex binSize: 1m, 5m, 1h, 1d
         std::string binSize = "1m";
         if (timeframe == "1m") binSize = "1m";
@@ -134,70 +134,114 @@ public:
         else if (timeframe == "1h") binSize = "1h";
         else if (timeframe == "1d") binSize = "1d";
 
-        std::string query = "symbol=" + instrument_name + "&binSize=" + binSize + "&count=500&reverse=true";
+        while (true) {
+            ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitmex", "", "");
 
-        request.appendParam({
-            {CCAPI_HTTP_PATH, "/api/v1/trade/bucketed"},
-            {CCAPI_HTTP_METHOD, "GET"},
-            {CCAPI_HTTP_QUERY_STRING, query}
-        });
+            std::string query = "symbol=" + instrument_name + "&binSize=" + binSize + "&count=" + std::to_string(limit) + "&reverse=false";
+            if (current_from > 0) {
+                // Bitmex requires ISO timestamp
+                auto tp = ccapi::UtilTime::makeTimePointFromMilliseconds(current_from);
+                query += "&startTime=" + ccapi::UtilTime::getISOTimestamp(tp);
+            }
+            if (to_date > 0) {
+                auto tp = ccapi::UtilTime::makeTimePointFromMilliseconds(to_date);
+                query += "&endTime=" + ccapi::UtilTime::getISOTimestamp(tp);
+            }
 
-        session->sendRequest(request);
+            request.appendParam({
+                {CCAPI_HTTP_PATH, "/api/v1/trade/bucketed"},
+                {CCAPI_HTTP_METHOD, "GET"},
+                {CCAPI_HTTP_QUERY_STRING, query}
+            });
 
-        auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
-            std::vector<ccapi::Event> events = session->getEventQueue().purge();
-            for (const auto& event : events) {
-                if (event.getType() == ccapi::Event::Type::RESPONSE) {
-                    for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
-                            for (const auto& element : message.getElementList()) {
-                                std::string json_content = element.getValue(CCAPI_HTTP_BODY);
-                                rapidjson::Document doc;
-                                doc.Parse(json_content.c_str());
+            session->sendRequest(request);
 
-                                if (!doc.HasParseError() && doc.IsArray()) {
-                                    for (const auto& kline : doc.GetArray()) {
-                                        Candle candle;
-                                        if (kline.HasMember("timestamp") && kline["timestamp"].IsString()) {
-                                            std::string ts = kline["timestamp"].GetString();
-                                            try {
-                                                auto tp = ccapi::UtilTime::parse(ts);
-                                                candle.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count();
-                                            } catch(...) {}
+            std::vector<Candle> batch_candles;
+            bool success = false;
+
+            auto start = std::chrono::steady_clock::now();
+            while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+                std::vector<ccapi::Event> events = session->getEventQueue().purge();
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                                for (const auto& element : message.getElementList()) {
+                                    if (element.has(CCAPI_HTTP_BODY)) {
+                                        std::string json_content = element.getValue(CCAPI_HTTP_BODY);
+                                        rapidjson::Document doc;
+                                        doc.Parse(json_content.c_str());
+
+                                        if (!doc.HasParseError() && doc.IsArray()) {
+                                            for (const auto& kline : doc.GetArray()) {
+                                                Candle candle;
+                                                if (kline.HasMember("timestamp") && kline["timestamp"].IsString()) {
+                                                    std::string ts = kline["timestamp"].GetString();
+                                                    try {
+                                                        auto tp = ccapi::UtilTime::parse(ts);
+                                                        candle.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count();
+                                                    } catch(...) {}
+                                                }
+                                                if (kline.HasMember("open") && kline["open"].IsNumber()) candle.open = kline["open"].GetDouble();
+                                                if (kline.HasMember("high") && kline["high"].IsNumber()) candle.high = kline["high"].GetDouble();
+                                                if (kline.HasMember("low") && kline["low"].IsNumber()) candle.low = kline["low"].GetDouble();
+                                                if (kline.HasMember("close") && kline["close"].IsNumber()) candle.close = kline["close"].GetDouble();
+                                                if (kline.HasMember("volume") && kline["volume"].IsNumber()) candle.volume = kline["volume"].GetDouble();
+
+                                                batch_candles.push_back(candle);
+                                            }
                                         }
-                                        if (kline.HasMember("open") && kline["open"].IsNumber()) candle.open = kline["open"].GetDouble();
-                                        if (kline.HasMember("high") && kline["high"].IsNumber()) candle.high = kline["high"].GetDouble();
-                                        if (kline.HasMember("low") && kline["low"].IsNumber()) candle.low = kline["low"].GetDouble();
-                                        if (kline.HasMember("close") && kline["close"].IsNumber()) candle.close = kline["close"].GetDouble();
-                                        if (kline.HasMember("volume") && kline["volume"].IsNumber()) candle.volume = kline["volume"].GetDouble();
-
-                                        candles.push_back(candle);
+                                        success = true;
                                     }
                                 }
+                            } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                                // std::cout << "[DEBUG] Bitmex Error: " << message.toString() << std::endl;
+                                success = true;
                             }
-
-                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                return a.timestamp < b.timestamp;
-                            });
-
-                            if (from_date > 0 || to_date > 0) {
-                                auto it = std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
-                                    if (from_date > 0 && c.timestamp < from_date) return true;
-                                    if (to_date > 0 && c.timestamp >= to_date) return true;
-                                    return false;
-                                });
-                                candles.erase(it, candles.end());
-                            }
-
-                            return candles;
                         }
                     }
                 }
+                if (success) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            if (batch_candles.empty()) {
+                break;
+            }
+
+            std::sort(batch_candles.begin(), batch_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+
+            all_candles.insert(all_candles.end(), batch_candles.begin(), batch_candles.end());
+
+            int64_t last_ts = batch_candles.back().timestamp;
+            current_from = last_ts + 1; // Not sure if Bitmex start is inclusive. Usually is. +1ms is safer.
+
+            if (current_from >= to_date) {
+                break;
+            }
+
+            if (batch_candles.size() < limit) {
+                break;
+            }
+
+            if (--max_loops <= 0) break;
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
-        return candles;
+
+        if (!all_candles.empty()) {
+             std::sort(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+            auto last = std::unique(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b){
+                return a.timestamp == b.timestamp;
+            });
+            all_candles.erase(last, all_candles.end());
+        }
+
+        return all_candles;
     }
 
 private:

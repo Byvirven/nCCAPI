@@ -94,85 +94,125 @@ public:
                                                const std::string& timeframe,
                                                int64_t from_date,
                                                int64_t to_date) {
-        std::vector<Candle> candles;
+        std::vector<Candle> all_candles;
 
-        // Deribit Generic Request
-        // Endpoint: /api/v2/public/get_tradingview_chart_data
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "deribit", "", "");
+        int64_t current_from = from_date;
+        const int limit = 1000; // Chunk size
+        int max_loops = 100;
 
         // Deribit resolution: 1, 3, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1D
         std::string resolution = "1";
-        if (timeframe == "1m") resolution = "1";
-        else if (timeframe == "5m") resolution = "5";
-        else if (timeframe == "1h") resolution = "60";
-        else if (timeframe == "1d") resolution = "1D";
+        int64_t interval_ms = 60000;
+        if (timeframe == "1m") { resolution = "1"; interval_ms = 60000; }
+        else if (timeframe == "5m") { resolution = "5"; interval_ms = 300000; }
+        else if (timeframe == "1h") { resolution = "60"; interval_ms = 3600000; }
+        else if (timeframe == "1d") { resolution = "1D"; interval_ms = 86400000; }
 
-        std::string query = "instrument_name=" + instrument_name + "&resolution=" + resolution;
-        if (from_date > 0) {
-            query += "&start_timestamp=" + std::to_string(from_date);
-        }
-        if (to_date > 0) {
-            query += "&end_timestamp=" + std::to_string(to_date);
-        }
+        while (current_from < to_date) {
+            int64_t chunk_end = current_from + ((int64_t)limit * interval_ms);
+            if (chunk_end > to_date) chunk_end = to_date;
 
-        request.appendParam({
-            {CCAPI_HTTP_PATH, "/api/v2/public/get_tradingview_chart_data"},
-            {CCAPI_HTTP_METHOD, "GET"},
-            {CCAPI_HTTP_QUERY_STRING, query}
-        });
+            // Deribit Generic Request
+            // Endpoint: /api/v2/public/get_tradingview_chart_data
+            ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "deribit", "", "");
 
-        session->sendRequest(request);
+            std::string query = "instrument_name=" + instrument_name + "&resolution=" + resolution;
+            if (current_from > 0) {
+                query += "&start_timestamp=" + std::to_string(current_from);
+            }
+            if (chunk_end > 0) {
+                query += "&end_timestamp=" + std::to_string(chunk_end);
+            }
 
-        auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
-            std::vector<ccapi::Event> events = session->getEventQueue().purge();
-            for (const auto& event : events) {
-                if (event.getType() == ccapi::Event::Type::RESPONSE) {
-                    for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
-                            for (const auto& element : message.getElementList()) {
-                                if (element.has(CCAPI_HTTP_BODY)) {
-                                    std::string json_str = element.getValue(CCAPI_HTTP_BODY);
-                                    rapidjson::Document doc;
-                                    doc.Parse(json_str.c_str());
+            request.appendParam({
+                {CCAPI_HTTP_PATH, "/api/v2/public/get_tradingview_chart_data"},
+                {CCAPI_HTTP_METHOD, "GET"},
+                {CCAPI_HTTP_QUERY_STRING, query}
+            });
 
-                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("result") && doc["result"].IsObject()) {
-                                        const auto& res = doc["result"];
-                                        if (res.HasMember("ticks") && res["ticks"].IsArray()) {
-                                            const auto& ticks = res["ticks"];
-                                            const auto& opens = res["open"];
-                                            const auto& highs = res["high"];
-                                            const auto& lows = res["low"];
-                                            const auto& closes = res["close"];
-                                            const auto& volumes = res["volume"];
+            session->sendRequest(request);
 
-                                            for (size_t i = 0; i < ticks.Size(); ++i) {
-                                                Candle candle;
-                                                candle.timestamp = ticks[i].GetInt64();
-                                                candle.open = opens[i].GetDouble();
-                                                candle.high = highs[i].GetDouble();
-                                                candle.low = lows[i].GetDouble();
-                                                candle.close = closes[i].GetDouble();
-                                                candle.volume = volumes[i].GetDouble();
-                                                candles.push_back(candle);
+            std::vector<Candle> batch_candles;
+            bool success = false;
+
+            auto start = std::chrono::steady_clock::now();
+            while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+                std::vector<ccapi::Event> events = session->getEventQueue().purge();
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                                for (const auto& element : message.getElementList()) {
+                                    if (element.has(CCAPI_HTTP_BODY)) {
+                                        std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                        rapidjson::Document doc;
+                                        doc.Parse(json_str.c_str());
+
+                                        if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("result") && doc["result"].IsObject()) {
+                                            const auto& res = doc["result"];
+                                            if (res.HasMember("ticks") && res["ticks"].IsArray()) {
+                                                const auto& ticks = res["ticks"];
+                                                const auto& opens = res["open"];
+                                                const auto& highs = res["high"];
+                                                const auto& lows = res["low"];
+                                                const auto& closes = res["close"];
+                                                const auto& volumes = res["volume"];
+
+                                                for (size_t i = 0; i < ticks.Size(); ++i) {
+                                                    Candle candle;
+                                                    candle.timestamp = ticks[i].GetInt64();
+                                                    candle.open = opens[i].GetDouble();
+                                                    candle.high = highs[i].GetDouble();
+                                                    candle.low = lows[i].GetDouble();
+                                                    candle.close = closes[i].GetDouble();
+                                                    candle.volume = volumes[i].GetDouble();
+                                                    batch_candles.push_back(candle);
+                                                }
                                             }
                                         }
-                                        std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                            return a.timestamp < b.timestamp;
-                                        });
-                                        return candles;
+                                        success = true;
                                     }
                                 }
+                            } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                                // std::cout << "[DEBUG] Deribit Error: " << message.toString() << std::endl;
+                                success = true;
                             }
-                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                            return candles;
                         }
                     }
                 }
+                if (success) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            if (batch_candles.empty()) {
+                current_from = chunk_end;
+            } else {
+                std::sort(batch_candles.begin(), batch_candles.end(), [](const Candle& a, const Candle& b) {
+                    return a.timestamp < b.timestamp;
+                });
+
+                all_candles.insert(all_candles.end(), batch_candles.begin(), batch_candles.end());
+
+                current_from = chunk_end;
+            }
+
+            if (--max_loops <= 0) break;
+            if (current_from >= to_date) break;
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
-        return candles;
+
+        if (!all_candles.empty()) {
+             std::sort(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+            auto last = std::unique(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b){
+                return a.timestamp == b.timestamp;
+            });
+            all_candles.erase(last, all_candles.end());
+        }
+
+        return all_candles;
     }
 
 private:

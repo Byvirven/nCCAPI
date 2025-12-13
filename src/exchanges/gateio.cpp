@@ -74,96 +74,125 @@ public:
                                                const std::string& timeframe,
                                                int64_t from_date,
                                                int64_t to_date) {
-        std::vector<Candle> candles;
-
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "gateio", "", "");
+        std::vector<Candle> all_candles;
 
         // GateIO timeframe: 10s, 1m, 5m, 15m, 30m, 1h, 4h, 8h, 1d, 7d
         std::string interval = "1m";
-        if (timeframe == "1m") interval = "1m";
-        else if (timeframe == "5m") interval = "5m";
-        else if (timeframe == "15m") interval = "15m";
-        else if (timeframe == "30m") interval = "30m";
-        else if (timeframe == "1h") interval = "1h";
-        else if (timeframe == "4h") interval = "4h";
-        else if (timeframe == "8h") interval = "8h";
-        else if (timeframe == "1d") interval = "1d";
-        else if (timeframe == "1w") interval = "7d";
-        else interval = "1m";
+        if (timeframe == "1m") { interval = "1m"; }
+        else if (timeframe == "5m") { interval = "5m"; }
+        else if (timeframe == "15m") { interval = "15m"; }
+        else if (timeframe == "30m") { interval = "30m"; }
+        else if (timeframe == "1h") { interval = "1h"; }
+        else if (timeframe == "4h") { interval = "4h"; }
+        else if (timeframe == "8h") { interval = "8h"; }
+        else if (timeframe == "1d") { interval = "1d"; }
+        else if (timeframe == "1w") { interval = "7d"; }
 
-        std::string query_string = "currency_pair=" + instrument_name + "&interval=" + interval;
-        if (from_date > 0) query_string += "&from=" + std::to_string(from_date / 1000); // seconds
-        if (to_date > 0) query_string += "&to=" + std::to_string(to_date / 1000);
+        int64_t current_to = to_date;
+        const int limit = 1000;
+        int max_loops = 100;
 
-        request.appendParam({
-            {CCAPI_HTTP_METHOD, "GET"},
-            {CCAPI_HTTP_PATH, "/api/v4/spot/candlesticks"},
-            {CCAPI_HTTP_QUERY_STRING, query_string}
-        });
+        while (true) {
+            ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "gateio", "", "");
 
-        session->sendRequest(request);
+            std::string query_string = "currency_pair=" + instrument_name + "&interval=" + interval;
+            query_string += "&limit=" + std::to_string(limit);
+            if (current_to > 0) query_string += "&to=" + std::to_string(current_to / 1000); // seconds
+            // No 'from' parameter to force backward pagination from 'to' using 'limit'
 
-        auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
-            std::vector<ccapi::Event> events = session->getEventQueue().purge();
-            for (const auto& event : events) {
-                if (event.getType() == ccapi::Event::Type::RESPONSE) {
-                    for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
-                            for (const auto& element : message.getElementList()) {
-                                if (element.has(CCAPI_HTTP_BODY)) {
-                                    std::string json_str = element.getValue(CCAPI_HTTP_BODY);
-                                    rapidjson::Document doc;
-                                    doc.Parse(json_str.c_str());
+            request.appendParam({
+                {CCAPI_HTTP_METHOD, "GET"},
+                {CCAPI_HTTP_PATH, "/api/v4/spot/candlesticks"},
+                {CCAPI_HTTP_QUERY_STRING, query_string}
+            });
 
-                                    if (!doc.HasParseError() && doc.IsArray()) {
-                                        for (const auto& item : doc.GetArray()) {
-                                            // [ timestamp (sec), volume, close, high, low, open, ... ] (strings)
-                                            if (item.IsArray() && item.Size() >= 6) {
-                                                Candle candle;
-                                                // GateIO Spot:
-                                                // 0: timestamp (string)
-                                                // 1: volume (string)
-                                                // 2: close (string)
-                                                // 3: high (string)
-                                                // 4: low (string)
-                                                // 5: open (string)
+            session->sendRequest(request);
 
-                                                candle.timestamp = std::stoll(item[0].GetString()) * 1000;
-                                                candle.volume = std::stod(item[1].GetString());
-                                                candle.close = std::stod(item[2].GetString());
-                                                candle.high = std::stod(item[3].GetString());
-                                                candle.low = std::stod(item[4].GetString());
-                                                candle.open = std::stod(item[5].GetString());
+            std::vector<Candle> batch_candles;
+            bool success = false;
 
-                                                candles.push_back(candle);
+            auto start = std::chrono::steady_clock::now();
+            while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+                std::vector<ccapi::Event> events = session->getEventQueue().purge();
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                                for (const auto& element : message.getElementList()) {
+                                    if (element.has(CCAPI_HTTP_BODY)) {
+                                        std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                        rapidjson::Document doc;
+                                        doc.Parse(json_str.c_str());
+
+                                        if (!doc.HasParseError() && doc.IsArray()) {
+                                            for (const auto& item : doc.GetArray()) {
+                                                if (item.IsArray() && item.Size() >= 6) {
+                                                    Candle candle;
+                                                    candle.timestamp = std::stoll(item[0].GetString()) * 1000;
+                                                    candle.volume = std::stod(item[1].GetString());
+                                                    candle.close = std::stod(item[2].GetString());
+                                                    candle.high = std::stod(item[3].GetString());
+                                                    candle.low = std::stod(item[4].GetString());
+                                                    candle.open = std::stod(item[5].GetString());
+
+                                                    batch_candles.push_back(candle);
+                                                }
                                             }
                                         }
+                                        success = true;
                                     }
                                 }
+                            } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                                // std::cout << "[DEBUG] GateIO Error: " << message.toString() << std::endl;
+                                success = true;
                             }
-                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                            return candles;
                         }
                     }
                 }
+                if (success) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
-            if (!candles.empty()) {
-                if (from_date > 0 || to_date > 0) {
-                    candles.erase(std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
-                        if (from_date > 0 && c.timestamp < from_date) return true;
-                        if (to_date > 0 && c.timestamp > to_date) return true;
-                        return false;
-                    }), candles.end());
-                }
-                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                    return a.timestamp < b.timestamp;
-                });
-                return candles;
+
+            if (batch_candles.empty()) {
+                break;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            // GateIO returns candles? Order? Usually time ascending.
+            std::sort(batch_candles.begin(), batch_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+
+            all_candles.insert(all_candles.end(), batch_candles.begin(), batch_candles.end());
+
+            int64_t oldest_ts = batch_candles.front().timestamp;
+            current_to = oldest_ts - 1000; // -1 sec
+
+            if (current_to < from_date) break;
+            if (--max_loops <= 0) break;
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
-        return candles;
+
+        if (!all_candles.empty()) {
+             std::sort(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+            auto last = std::unique(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b){
+                return a.timestamp == b.timestamp;
+            });
+            all_candles.erase(last, all_candles.end());
+
+             if (from_date > 0 || to_date > 0) {
+                auto it = std::remove_if(all_candles.begin(), all_candles.end(), [from_date, to_date](const Candle& c) {
+                    if (from_date > 0 && c.timestamp < from_date) return true;
+                    if (to_date > 0 && c.timestamp > to_date) return true;
+                    return false;
+                });
+                all_candles.erase(it, all_candles.end());
+            }
+        }
+
+        return all_candles;
     }
 
 private:

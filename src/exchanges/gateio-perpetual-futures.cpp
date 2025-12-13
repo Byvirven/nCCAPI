@@ -19,7 +19,7 @@ public:
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
-        std::vector<std::string> settles = {"usdt", "btc", "usd"}; // Common settlement currencies
+        std::vector<std::string> settles = {"usdt", "btc", "usd"};
 
         for (const auto& settle : settles) {
             ccapi::Request request(ccapi::Request::Operation::GET_INSTRUMENTS, "gateio-perpetual-futures");
@@ -53,14 +53,14 @@ public:
                                     std::string qty_min = element.getValue(CCAPI_ORDER_QUANTITY_MIN);
                                     if (!qty_min.empty()) { try { instrument.min_size = std::stod(qty_min); } catch(...) {} }
 
-                                    instrument.contract_size = 1.0; // GateIO perp usually 1 contract
+                                    instrument.contract_size = 1.0;
 
                                     if (!instrument.base.empty() && !instrument.quote.empty()) {
                                         instrument.symbol = instrument.base + "/" + instrument.quote;
                                     } else {
                                         instrument.symbol = instrument.id;
                                     }
-                                    instrument.type = "swap"; // Perpetual
+                                    instrument.type = "swap";
 
                                     for (const auto& pair : element.getNameValueMap()) {
                                         instrument.info[std::string(pair.first)] = pair.second;
@@ -84,12 +84,8 @@ public:
                                                const std::string& timeframe,
                                                int64_t from_date,
                                                int64_t to_date) {
-        std::vector<Candle> candles;
+        std::vector<Candle> all_candles;
 
-        // GateIO Perp Generic Request
-        // Endpoint: /api/v4/futures/{settle}/candlesticks
-        // We need to guess the settle from the instrument name.
-        // Usually ends in _USDT or _USD or _BTC
         std::string settle = "usdt";
         if (instrument_name.find("_USD") != std::string::npos) {
             if (instrument_name.find("_USDT") != std::string::npos) settle = "usdt";
@@ -100,76 +96,115 @@ public:
 
         std::string path = "/api/v4/futures/" + settle + "/candlesticks";
 
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "gateio-perpetual-futures", "", "");
-
-        // GateIO interval: 10s, 1m, 5m, 15m, 30m, 1h, 4h, 8h, 1d, 7d
         std::string interval = "1m";
         if (timeframe == "1m") interval = "1m";
         else if (timeframe == "5m") interval = "5m";
         else if (timeframe == "1h") interval = "1h";
         else if (timeframe == "1d") interval = "1d";
 
-        std::string query = "contract=" + instrument_name + "&interval=" + interval;
-        if (from_date > 0) {
-            query += "&from=" + std::to_string(from_date / 1000);
-            if (to_date > 0) {
-                query += "&to=" + std::to_string(to_date / 1000);
-            }
-        } else {
-            query += "&limit=2000";
-        }
+        int64_t current_to = to_date;
+        const int limit = 2000;
+        int max_loops = 100;
 
-        request.appendParam({
-            {CCAPI_HTTP_PATH, path},
-            {CCAPI_HTTP_METHOD, "GET"},
-            {CCAPI_HTTP_QUERY_STRING, query}
-        });
+        while (true) {
+            ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "gateio-perpetual-futures", "", "");
 
-        session->sendRequest(request);
+            std::string query = "contract=" + instrument_name + "&interval=" + interval;
+            query += "&limit=" + std::to_string(limit);
+            if (current_to > 0) query += "&to=" + std::to_string(current_to / 1000); // seconds
+            // No 'from', rely on 'to' and 'limit' (backward)
 
-        auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
-            std::vector<ccapi::Event> events = session->getEventQueue().purge();
-            for (const auto& event : events) {
-                if (event.getType() == ccapi::Event::Type::RESPONSE) {
-                    for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
-                            for (const auto& element : message.getElementList()) {
-                                if (element.has(CCAPI_HTTP_BODY)) {
-                                    std::string json_str = element.getValue(CCAPI_HTTP_BODY);
-                                    rapidjson::Document doc;
-                                    doc.Parse(json_str.c_str());
+            request.appendParam({
+                {CCAPI_HTTP_PATH, path},
+                {CCAPI_HTTP_METHOD, "GET"},
+                {CCAPI_HTTP_QUERY_STRING, query}
+            });
 
-                                    if (!doc.HasParseError() && doc.IsArray()) {
-                                        for (const auto& item : doc.GetArray()) {
-                                            if (item.IsObject()) {
-                                                Candle candle;
-                                                if (item.HasMember("t")) candle.timestamp = (int64_t)item["t"].GetInt64() * 1000;
-                                                if (item.HasMember("o")) candle.open = std::stod(item["o"].GetString());
-                                                if (item.HasMember("h")) candle.high = std::stod(item["h"].GetString());
-                                                if (item.HasMember("l")) candle.low = std::stod(item["l"].GetString());
-                                                if (item.HasMember("c")) candle.close = std::stod(item["c"].GetString());
-                                                if (item.HasMember("v")) candle.volume = (double)item["v"].GetInt64(); // Volume is integer number of contracts
+            session->sendRequest(request);
 
-                                                candles.push_back(candle);
+            std::vector<Candle> batch_candles;
+            bool success = false;
+
+            auto start = std::chrono::steady_clock::now();
+            while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+                std::vector<ccapi::Event> events = session->getEventQueue().purge();
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                                for (const auto& element : message.getElementList()) {
+                                    if (element.has(CCAPI_HTTP_BODY)) {
+                                        std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                        rapidjson::Document doc;
+                                        doc.Parse(json_str.c_str());
+
+                                        if (!doc.HasParseError() && doc.IsArray()) {
+                                            for (const auto& item : doc.GetArray()) {
+                                                if (item.IsObject()) {
+                                                    Candle candle;
+                                                    if (item.HasMember("t")) candle.timestamp = (int64_t)item["t"].GetInt64() * 1000;
+                                                    if (item.HasMember("o")) candle.open = std::stod(item["o"].GetString());
+                                                    if (item.HasMember("h")) candle.high = std::stod(item["h"].GetString());
+                                                    if (item.HasMember("l")) candle.low = std::stod(item["l"].GetString());
+                                                    if (item.HasMember("c")) candle.close = std::stod(item["c"].GetString());
+                                                    if (item.HasMember("v")) candle.volume = (double)item["v"].GetInt64();
+
+                                                    batch_candles.push_back(candle);
+                                                }
                                             }
                                         }
-                                        std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                            return a.timestamp < b.timestamp;
-                                        });
-                                        return candles;
+                                        success = true;
                                     }
                                 }
+                            } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                                success = true;
                             }
-                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                            return candles;
                         }
                     }
                 }
+                if (success) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            if (batch_candles.empty()) {
+                break;
+            }
+
+            std::sort(batch_candles.begin(), batch_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+
+            all_candles.insert(all_candles.end(), batch_candles.begin(), batch_candles.end());
+
+            int64_t oldest_ts = batch_candles.front().timestamp;
+            current_to = oldest_ts - 1000; // -1 sec
+
+            if (current_to < from_date) break;
+            if (--max_loops <= 0) break;
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
-        return candles;
+
+        if (!all_candles.empty()) {
+             std::sort(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+            auto last = std::unique(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b){
+                return a.timestamp == b.timestamp;
+            });
+            all_candles.erase(last, all_candles.end());
+
+             if (from_date > 0 || to_date > 0) {
+                auto it = std::remove_if(all_candles.begin(), all_candles.end(), [from_date, to_date](const Candle& c) {
+                    if (from_date > 0 && c.timestamp < from_date) return true;
+                    if (to_date > 0 && c.timestamp > to_date) return true;
+                    return false;
+                });
+                all_candles.erase(it, all_candles.end());
+            }
+        }
+
+        return all_candles;
     }
 
 private:

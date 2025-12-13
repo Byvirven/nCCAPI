@@ -76,12 +76,13 @@ public:
                                                const std::string& timeframe,
                                                int64_t from_date,
                                                int64_t to_date) {
-        std::vector<Candle> candles;
-        // Pass instrument_name to Request constructor
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitmart", instrument_name, "");
+        std::vector<Candle> all_candles;
+
+        int64_t current_from = from_date;
+        const int limit = 200;
+        int max_loops = 50;
 
         // Bitmart API: step in minutes.
-        // 1, 3, 5, 15, 30, 45, 60, 120, 180, 240, 1440, 10080, 43200
         int step = 60;
         if (timeframe == "1m") step = 1;
         else if (timeframe == "3m") step = 3;
@@ -97,66 +98,122 @@ public:
         else if (timeframe == "1w") step = 10080;
         else if (timeframe == "1M") step = 43200;
 
-        std::string query = "symbol=" + instrument_name + "&step=" + std::to_string(step);
-        if (from_date > 0) query += "&after=" + std::to_string(from_date / 1000);
-        if (to_date > 0) query += "&before=" + std::to_string(to_date / 1000);
+        while (true) {
+            ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitmart", instrument_name, "");
 
-        request.appendParam({
-            {CCAPI_HTTP_PATH, "/spot/quotation/v3/klines"},
-            {CCAPI_HTTP_METHOD, "GET"},
-            {CCAPI_HTTP_QUERY_STRING, query}
-        });
+            std::string query = "symbol=" + instrument_name + "&step=" + std::to_string(step);
+            query += "&limit=" + std::to_string(limit);
+            if (current_from > 0) query += "&after=" + std::to_string(current_from / 1000);
+            // We do NOT use 'before' when paginating forward with 'after'.
 
-        session->sendRequest(request);
+            request.appendParam({
+                {CCAPI_HTTP_PATH, "/spot/quotation/v3/klines"},
+                {CCAPI_HTTP_METHOD, "GET"},
+                {CCAPI_HTTP_QUERY_STRING, query}
+            });
 
-        auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
-            std::vector<ccapi::Event> events = session->getEventQueue().purge();
-            for (const auto& event : events) {
-                if (event.getType() == ccapi::Event::Type::RESPONSE) {
-                    for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
-                            for (const auto& element : message.getElementList()) {
-                                if (element.has(CCAPI_HTTP_BODY)) {
-                                    std::string json_content = element.getValue(CCAPI_HTTP_BODY);
-                                    rapidjson::Document doc;
-                                    doc.Parse(json_content.c_str());
+            session->sendRequest(request);
 
-                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
-                                        const auto& data = doc["data"];
-                                        for (const auto& kline : data.GetArray()) {
-                                            if (kline.IsArray() && kline.Size() >= 7) {
-                                                Candle candle;
-                                                // Bitmart returns [timestamp (sec), open, high, low, close, volume, ...]
-                                                // Timestamp might be int or double
-                                                if (kline[0].IsInt64()) candle.timestamp = static_cast<uint64_t>(kline[0].GetInt64()) * 1000;
-                                                else if (kline[0].IsDouble()) candle.timestamp = static_cast<uint64_t>(kline[0].GetDouble()) * 1000;
-                                                else if (kline[0].IsString()) candle.timestamp = static_cast<uint64_t>(std::stoll(kline[0].GetString())) * 1000;
-                                                else continue;
+            std::vector<Candle> batch_candles;
+            bool success = false;
 
-                                                candle.open = std::stod(kline[1].GetString());
-                                                candle.high = std::stod(kline[2].GetString());
-                                                candle.low = std::stod(kline[3].GetString());
-                                                candle.close = std::stod(kline[4].GetString());
-                                                candle.volume = std::stod(kline[5].GetString());
-                                                candles.push_back(candle);
+            auto start = std::chrono::steady_clock::now();
+            while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+                std::vector<ccapi::Event> events = session->getEventQueue().purge();
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                                for (const auto& element : message.getElementList()) {
+                                    if (element.has(CCAPI_HTTP_BODY)) {
+                                        std::string json_content = element.getValue(CCAPI_HTTP_BODY);
+                                        rapidjson::Document doc;
+                                        doc.Parse(json_content.c_str());
+
+                                        if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
+                                            const auto& data = doc["data"];
+                                            for (const auto& kline : data.GetArray()) {
+                                                if (kline.IsArray() && kline.Size() >= 7) {
+                                                    Candle candle;
+                                                    if (kline[0].IsInt64()) candle.timestamp = static_cast<uint64_t>(kline[0].GetInt64()) * 1000;
+                                                    else if (kline[0].IsDouble()) candle.timestamp = static_cast<uint64_t>(kline[0].GetDouble()) * 1000;
+                                                    else if (kline[0].IsString()) candle.timestamp = static_cast<uint64_t>(std::stoll(kline[0].GetString())) * 1000;
+                                                    else continue;
+
+                                                    candle.open = std::stod(kline[1].GetString());
+                                                    candle.high = std::stod(kline[2].GetString());
+                                                    candle.low = std::stod(kline[3].GetString());
+                                                    candle.close = std::stod(kline[4].GetString());
+                                                    candle.volume = std::stod(kline[5].GetString());
+                                                    batch_candles.push_back(candle);
+                                                }
                                             }
+                                        } else {
+                                            // std::cout << "[DEBUG] Bitmart Parse Error or No Data: " << json_content << std::endl;
                                         }
+                                        success = true;
                                     }
                                 }
+                            } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                                std::cout << "[DEBUG] Bitmart Error: " << message.toString() << std::endl;
+                                success = true;
                             }
-
-                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                return a.timestamp < b.timestamp;
-                            });
-                            return candles;
                         }
                     }
                 }
+                if (success) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            if (batch_candles.empty()) {
+                break;
+            }
+
+            // Bitmart returns newest first? "The returned data is sorted in descending order of time."
+            // We need ascending for pagination if we use 'after'.
+            // If we use 'after', it returns data after 'after'.
+            // Docs: "after: Query range start time".
+            // So if sorted descending, it returns from (after + limit) down to (after)?
+            // Or does it return from (after) up to (after + limit)?
+            // Usually 'after' implies getting older data? No, 'after' usually means newer data.
+            // But if response is descending, we get [newest ... oldest].
+            // If we sort ascending: [oldest ... newest].
+            // Oldest should be close to 'after'.
+
+            std::sort(batch_candles.begin(), batch_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+
+            all_candles.insert(all_candles.end(), batch_candles.begin(), batch_candles.end());
+
+            int64_t last_ts = batch_candles.back().timestamp;
+            current_from = last_ts + 1000; // +1 sec (since Bitmart uses sec)
+
+            if (current_from >= to_date) {
+                break;
+            }
+
+            if (batch_candles.size() < limit) {
+                break;
+            }
+
+            if (--max_loops <= 0) break;
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
-        return candles;
+
+        // Final Sort and Filter
+        if (!all_candles.empty()) {
+            std::sort(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+            auto last = std::unique(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b){
+                return a.timestamp == b.timestamp;
+            });
+            all_candles.erase(last, all_candles.end());
+        }
+
+        return all_candles;
     }
 
 private:

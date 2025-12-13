@@ -123,9 +123,7 @@ public:
                                                const std::string& timeframe,
                                                int64_t from_date,
                                                int64_t to_date) {
-        std::vector<Candle> candles;
-
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "coinbase", "", "");
+        std::vector<Candle> all_candles;
 
         std::string granularity = "60";
         if (timeframe == "1m") granularity = "60";
@@ -138,80 +136,112 @@ public:
 
         std::string path = "/products/" + instrument_name + "/candles";
 
-        // Floor start time to align with granularity to ensure inclusion
         int64_t tf_ms = get_timeframe_ms(timeframe);
-        int64_t adjusted_from = from_date;
-        if (adjusted_from > 0) {
-            adjusted_from = (adjusted_from / tf_ms) * tf_ms;
+        int64_t current_from = from_date;
+        if (current_from > 0) {
+            current_from = (current_from / tf_ms) * tf_ms;
         }
+        const int limit = 300;
+        int max_loops = 50;
 
-        std::string query_string = "granularity=" + granularity;
+        while (current_from < to_date) {
+            int64_t chunk_end = current_from + (limit * tf_ms);
+            // Coinbase calculates number of candles = (end - start) / granularity.
+            // If we want max 300, range should be 300 * granularity.
+            // BUT: "If the start/end time are not aligned, they will be aligned to the start of the granularity bucket."
+            // AND: "The maximum number of data points for a single request is 300."
 
-        if (adjusted_from > 0) {
-            query_string += "&start=" + url_encode(timestamp_to_iso8601(adjusted_from));
-        }
-        if (to_date > 0) {
-             query_string += "&end=" + url_encode(timestamp_to_iso8601(to_date));
-        }
+            if (chunk_end > to_date) chunk_end = to_date;
 
-        std::map<std::string, std::string> params = {
-            {CCAPI_HTTP_PATH, path},
-            {CCAPI_HTTP_METHOD, "GET"},
-            {CCAPI_HTTP_QUERY_STRING, query_string}
-        };
+            ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "coinbase", "", "");
 
-        request.appendParam(params);
+            std::string query_string = "granularity=" + granularity;
+            query_string += "&start=" + url_encode(timestamp_to_iso8601(current_from));
+            query_string += "&end=" + url_encode(timestamp_to_iso8601(chunk_end));
 
-        session->sendRequest(request);
+            std::map<std::string, std::string> params = {
+                {CCAPI_HTTP_PATH, path},
+                {CCAPI_HTTP_METHOD, "GET"},
+                {CCAPI_HTTP_QUERY_STRING, query_string}
+            };
 
-        auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
-            std::vector<ccapi::Event> events = session->getEventQueue().purge();
-            for (const auto& event : events) {
-                if (event.getType() == ccapi::Event::Type::RESPONSE) {
-                    for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
-                            for (const auto& element : message.getElementList()) {
-                                if (element.has(CCAPI_HTTP_BODY)) {
-                                    std::string json_str = element.getValue(CCAPI_HTTP_BODY);
-                                    rapidjson::Document doc;
-                                    doc.Parse(json_str.c_str());
+            request.appendParam(params);
 
-                                    if (!doc.HasParseError() && doc.IsArray()) {
-                                        for (const auto& item : doc.GetArray()) {
-                                            if (item.IsArray() && item.Size() >= 6) {
-                                                Candle candle;
-                                                candle.timestamp = item[0].GetInt64() * 1000;
-                                                candle.low = item[1].GetDouble();
-                                                candle.high = item[2].GetDouble();
-                                                candle.open = item[3].GetDouble();
-                                                candle.close = item[4].GetDouble();
-                                                candle.volume = item[5].GetDouble();
+            session->sendRequest(request);
 
-                                                candles.push_back(candle);
+            std::vector<Candle> batch_candles;
+            bool success = false;
+
+            auto start = std::chrono::steady_clock::now();
+            while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+                std::vector<ccapi::Event> events = session->getEventQueue().purge();
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                                for (const auto& element : message.getElementList()) {
+                                    if (element.has(CCAPI_HTTP_BODY)) {
+                                        std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                        rapidjson::Document doc;
+                                        doc.Parse(json_str.c_str());
+
+                                        if (!doc.HasParseError() && doc.IsArray()) {
+                                            for (const auto& item : doc.GetArray()) {
+                                                if (item.IsArray() && item.Size() >= 6) {
+                                                    Candle candle;
+                                                    candle.timestamp = item[0].GetInt64() * 1000;
+                                                    candle.low = item[1].GetDouble();
+                                                    candle.high = item[2].GetDouble();
+                                                    candle.open = item[3].GetDouble();
+                                                    candle.close = item[4].GetDouble();
+                                                    candle.volume = item[5].GetDouble();
+
+                                                    batch_candles.push_back(candle);
+                                                }
                                             }
                                         }
+                                        success = true;
                                     }
                                 }
+                            } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                                // std::cout << "[DEBUG] Coinbase Error: " << message.toString() << std::endl;
+                                success = true;
                             }
-                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                            return candles;
                         }
                     }
                 }
+                if (success) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
-            if (!candles.empty()) {
-                // Filter again just in case API returned extra, but use adjusted_from logic
-                // Actually, if we requested specific range, we should trust it, but sorting is needed.
-                // Coinbase returns newest first.
-                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                    return a.timestamp < b.timestamp;
-                });
-                return candles;
+
+            if (batch_candles.empty()) {
+                break;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            std::sort(batch_candles.begin(), batch_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+
+            all_candles.insert(all_candles.end(), batch_candles.begin(), batch_candles.end());
+
+            current_from = chunk_end;
+
+            if (--max_loops <= 0) break;
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(250)); // Coinbase rate limit safe
         }
-        return candles;
+
+        if (!all_candles.empty()) {
+            std::sort(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+            auto last = std::unique(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b){
+                return a.timestamp == b.timestamp;
+            });
+            all_candles.erase(last, all_candles.end());
+        }
+
+        return all_candles;
     }
 
 private:

@@ -74,87 +74,123 @@ public:
                                                const std::string& timeframe,
                                                int64_t from_date,
                                                int64_t to_date) {
-        std::vector<Candle> candles;
+        std::vector<Candle> all_candles;
 
         // Bitstamp uses /api/v2/ohlc/{symbol}/
         // We must manually construct URL
         std::string path = "/api/v2/ohlc/" + instrument_name + "/";
-
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitstamp", "", "");
 
         std::string step = "60";
         if (timeframe == "1m") step = "60";
         else if (timeframe == "1h") step = "3600";
         else if (timeframe == "1d") step = "86400";
 
-        std::string query = "step=" + step + "&limit=1000";
+        int64_t current_from = from_date;
+        const int limit = 1000;
+        int max_loops = 50;
 
-        // Bitstamp does not support start/end for OHLC easily in public API v2, mainly step/limit
+        while (true) {
+            ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitstamp", "", "");
 
-        request.appendParam({
-            {CCAPI_HTTP_PATH, path},
-            {CCAPI_HTTP_METHOD, "GET"},
-            {CCAPI_HTTP_QUERY_STRING, query}
-        });
+            std::string query = "step=" + step + "&limit=" + std::to_string(limit);
+            if (current_from > 0) query += "&start=" + std::to_string(current_from / 1000); // Bitstamp uses seconds
+            // Note: Bitstamp 'start' is inclusive.
 
-        session->sendRequest(request);
+            request.appendParam({
+                {CCAPI_HTTP_PATH, path},
+                {CCAPI_HTTP_METHOD, "GET"},
+                {CCAPI_HTTP_QUERY_STRING, query}
+            });
 
-        auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
-            std::vector<ccapi::Event> events = session->getEventQueue().purge();
-            for (const auto& event : events) {
-                if (event.getType() == ccapi::Event::Type::RESPONSE) {
-                    for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
-                            for (const auto& element : message.getElementList()) {
-                                if (element.has(CCAPI_HTTP_BODY)) {
-                                    std::string json_str = element.getValue(CCAPI_HTTP_BODY);
-                                    rapidjson::Document doc;
-                                    doc.Parse(json_str.c_str());
+            session->sendRequest(request);
 
-                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsObject() && doc["data"].HasMember("ohlc") && doc["data"]["ohlc"].IsArray()) {
-                                        for (const auto& item : doc["data"]["ohlc"].GetArray()) {
-                                            if (item.IsObject()) {
-                                                Candle candle;
-                                                if (item.HasMember("timestamp")) {
-                                                    std::string ts = item["timestamp"].GetString();
-                                                    candle.timestamp = std::stoll(ts) * 1000;
+            std::vector<Candle> batch_candles;
+            bool success = false;
+
+            auto start = std::chrono::steady_clock::now();
+            while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+                std::vector<ccapi::Event> events = session->getEventQueue().purge();
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                                for (const auto& element : message.getElementList()) {
+                                    if (element.has(CCAPI_HTTP_BODY)) {
+                                        std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                        rapidjson::Document doc;
+                                        doc.Parse(json_str.c_str());
+
+                                        if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsObject() && doc["data"].HasMember("ohlc") && doc["data"]["ohlc"].IsArray()) {
+                                            for (const auto& item : doc["data"]["ohlc"].GetArray()) {
+                                                if (item.IsObject()) {
+                                                    Candle candle;
+                                                    if (item.HasMember("timestamp")) {
+                                                        std::string ts = item["timestamp"].GetString();
+                                                        candle.timestamp = std::stoll(ts) * 1000;
+                                                    }
+                                                    if (item.HasMember("open")) candle.open = std::stod(item["open"].GetString());
+                                                    if (item.HasMember("high")) candle.high = std::stod(item["high"].GetString());
+                                                    if (item.HasMember("low")) candle.low = std::stod(item["low"].GetString());
+                                                    if (item.HasMember("close")) candle.close = std::stod(item["close"].GetString());
+                                                    if (item.HasMember("volume")) candle.volume = std::stod(item["volume"].GetString());
+
+                                                    batch_candles.push_back(candle);
                                                 }
-                                                if (item.HasMember("open")) candle.open = std::stod(item["open"].GetString());
-                                                if (item.HasMember("high")) candle.high = std::stod(item["high"].GetString());
-                                                if (item.HasMember("low")) candle.low = std::stod(item["low"].GetString());
-                                                if (item.HasMember("close")) candle.close = std::stod(item["close"].GetString());
-                                                if (item.HasMember("volume")) candle.volume = std::stod(item["volume"].GetString());
-
-                                                candles.push_back(candle);
                                             }
                                         }
-                                        std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                            return a.timestamp < b.timestamp;
-                                        });
-
-                                        if (from_date > 0 || to_date > 0) {
-                                            auto it = std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
-                                                if (from_date > 0 && c.timestamp < from_date) return true;
-                                                if (to_date > 0 && c.timestamp >= to_date) return true;
-                                                return false;
-                                            });
-                                            candles.erase(it, candles.end());
-                                        }
-
-                                        return candles;
+                                        success = true;
                                     }
                                 }
+                            } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                                // std::cout << "[DEBUG] Bitstamp Error: " << message.toString() << std::endl;
+                                success = true;
                             }
-                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                            return candles;
                         }
                     }
                 }
+                if (success) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            if (batch_candles.empty()) {
+                break;
+            }
+
+            std::sort(batch_candles.begin(), batch_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+
+            all_candles.insert(all_candles.end(), batch_candles.begin(), batch_candles.end());
+
+            int64_t last_ts = batch_candles.back().timestamp;
+            // Next start = last + step (in seconds for param, but here we track ms)
+            // Bitstamp step is in seconds.
+            current_from = last_ts + (std::stoi(step) * 1000);
+
+            if (current_from >= to_date) {
+                break;
+            }
+
+            if (batch_candles.size() < limit) {
+                break;
+            }
+
+            if (--max_loops <= 0) break;
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
-        return candles;
+
+        if (!all_candles.empty()) {
+             std::sort(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+            auto last = std::unique(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b){
+                return a.timestamp == b.timestamp;
+            });
+            all_candles.erase(last, all_candles.end());
+        }
+
+        return all_candles;
     }
 
 private:

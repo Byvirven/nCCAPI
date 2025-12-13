@@ -77,92 +77,129 @@ public:
                                                const std::string& timeframe,
                                                int64_t from_date,
                                                int64_t to_date) {
-        std::vector<Candle> candles;
+        std::vector<Candle> all_candles;
+
+        int64_t current_from = from_date;
+        const int limit = 2000;
+        int max_loops = 100;
 
         // Huobi USDT Swap (Linear)
         // Endpoint: /linear-swap-ex/market/history/kline
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "huobi-usdt-swap", "", "");
 
         // Huobi period: 1min, 5min, 15min, 30min, 60min, 4hour, 1day, 1mon, 1week, 1year
         std::string period = "1min";
-        if (timeframe == "1m") period = "1min";
-        else if (timeframe == "5m") period = "5min";
-        else if (timeframe == "15m") period = "15min";
-        else if (timeframe == "30m") period = "30min";
-        else if (timeframe == "1h") period = "60min";
-        else if (timeframe == "4h") period = "4hour";
-        else if (timeframe == "1d") period = "1day";
-        else if (timeframe == "1w") period = "1week";
-        else if (timeframe == "1M") period = "1mon";
-        else period = "1min";
+        int64_t interval_ms = 60000;
+        if (timeframe == "1m") { period = "1min"; interval_ms = 60000; }
+        else if (timeframe == "5m") { period = "5min"; interval_ms = 300000; }
+        else if (timeframe == "15m") { period = "15min"; interval_ms = 900000; }
+        else if (timeframe == "30m") { period = "30min"; interval_ms = 1800000; }
+        else if (timeframe == "1h") { period = "60min"; interval_ms = 3600000; }
+        else if (timeframe == "4h") { period = "4hour"; interval_ms = 14400000; }
+        else if (timeframe == "1d") { period = "1day"; interval_ms = 86400000; }
+        else if (timeframe == "1w") { period = "1week"; interval_ms = 604800000; }
+        else if (timeframe == "1M") { period = "1mon"; interval_ms = 2592000000; }
 
         std::string symbol = instrument_name;
         if (symbol.find("-USDT") == std::string::npos) {
             symbol += "-USDT";
         }
 
-        std::string query = "contract_code=" + symbol + "&period=" + period + "&size=2000";
+        while (current_from < to_date) {
+            int64_t chunk_end = current_from + (limit * interval_ms);
+            if (chunk_end > to_date) chunk_end = to_date;
 
-        request.appendParam({
-            {CCAPI_HTTP_PATH, "/linear-swap-ex/market/history/kline"},
-            {CCAPI_HTTP_METHOD, "GET"},
-            {CCAPI_HTTP_QUERY_STRING, query}
-        });
+            ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "huobi-usdt-swap", "", "");
 
-        session->sendRequest(request);
+            std::string query = "contract_code=" + symbol + "&period=" + period;
+            if (current_from > 0 && chunk_end > 0) {
+                 query += "&from=" + std::to_string(current_from / 1000);
+                 query += "&to=" + std::to_string(chunk_end / 1000);
+            } else {
+                 query += "&size=" + std::to_string(limit);
+            }
 
-        auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
-            std::vector<ccapi::Event> events = session->getEventQueue().purge();
-            for (const auto& event : events) {
-                if (event.getType() == ccapi::Event::Type::RESPONSE) {
-                    for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
-                            for (const auto& element : message.getElementList()) {
-                                if (element.has(CCAPI_HTTP_BODY)) {
-                                    std::string json_content = element.getValue(CCAPI_HTTP_BODY);
-                                    rapidjson::Document doc;
-                                    doc.Parse(json_content.c_str());
+            request.appendParam({
+                {CCAPI_HTTP_PATH, "/linear-swap-ex/market/history/kline"},
+                {CCAPI_HTTP_METHOD, "GET"},
+                {CCAPI_HTTP_QUERY_STRING, query}
+            });
 
-                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
-                                        for (const auto& kline : doc["data"].GetArray()) {
-                                            if (kline.IsObject()) {
-                                                Candle candle;
-                                                if (kline.HasMember("id") && kline["id"].IsInt64()) candle.timestamp = kline["id"].GetInt64() * 1000;
-                                                if (kline.HasMember("open") && kline["open"].IsNumber()) candle.open = kline["open"].GetDouble();
-                                                if (kline.HasMember("high") && kline["high"].IsNumber()) candle.high = kline["high"].GetDouble();
-                                                if (kline.HasMember("low") && kline["low"].IsNumber()) candle.low = kline["low"].GetDouble();
-                                                if (kline.HasMember("close") && kline["close"].IsNumber()) candle.close = kline["close"].GetDouble();
-                                                if (kline.HasMember("vol") && kline["vol"].IsNumber()) candle.volume = kline["vol"].GetDouble();
+            session->sendRequest(request);
 
-                                                candles.push_back(candle);
+            std::vector<Candle> batch_candles;
+            bool success = false;
+
+            auto start = std::chrono::steady_clock::now();
+            while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+                std::vector<ccapi::Event> events = session->getEventQueue().purge();
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                                for (const auto& element : message.getElementList()) {
+                                    if (element.has(CCAPI_HTTP_BODY)) {
+                                        std::string json_content = element.getValue(CCAPI_HTTP_BODY);
+                                        rapidjson::Document doc;
+                                        doc.Parse(json_content.c_str());
+
+                                        if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
+                                            for (const auto& kline : doc["data"].GetArray()) {
+                                                if (kline.IsObject()) {
+                                                    Candle candle;
+                                                    if (kline.HasMember("id") && kline["id"].IsInt64()) candle.timestamp = kline["id"].GetInt64() * 1000;
+                                                    if (kline.HasMember("open") && kline["open"].IsNumber()) candle.open = kline["open"].GetDouble();
+                                                    if (kline.HasMember("high") && kline["high"].IsNumber()) candle.high = kline["high"].GetDouble();
+                                                    if (kline.HasMember("low") && kline["low"].IsNumber()) candle.low = kline["low"].GetDouble();
+                                                    if (kline.HasMember("close") && kline["close"].IsNumber()) candle.close = kline["close"].GetDouble();
+                                                    if (kline.HasMember("vol") && kline["vol"].IsNumber()) candle.volume = kline["vol"].GetDouble();
+
+                                                    batch_candles.push_back(candle);
+                                                }
                                             }
                                         }
+                                        success = true;
                                     }
                                 }
+                            } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                                // std::cout << "[DEBUG] Huobi USDT Swap Error: " << message.toString() << std::endl;
+                                success = true;
                             }
-
-                            std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                return a.timestamp < b.timestamp;
-                            });
-
-                            if (from_date > 0 || to_date > 0) {
-                                auto it = std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
-                                    if (from_date > 0 && c.timestamp < from_date) return true;
-                                    if (to_date > 0 && c.timestamp >= to_date) return true;
-                                    return false;
-                                });
-                                candles.erase(it, candles.end());
-                            }
-
-                            return candles;
                         }
                     }
                 }
+                if (success) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            if (batch_candles.empty()) {
+                current_from = chunk_end;
+            } else {
+                 std::sort(batch_candles.begin(), batch_candles.end(), [](const Candle& a, const Candle& b) {
+                    return a.timestamp < b.timestamp;
+                });
+
+                all_candles.insert(all_candles.end(), batch_candles.begin(), batch_candles.end());
+
+                current_from = chunk_end;
+            }
+
+            if (--max_loops <= 0) break;
+            if (current_from >= to_date) break;
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
-        return candles;
+
+        if (!all_candles.empty()) {
+             std::sort(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+            auto last = std::unique(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b){
+                return a.timestamp == b.timestamp;
+            });
+            all_candles.erase(last, all_candles.end());
+        }
+
+        return all_candles;
     }
 
 private:

@@ -19,7 +19,6 @@ public:
 
     std::vector<Instrument> get_instruments() {
         std::vector<Instrument> instruments;
-        // Restore Native GET_INSTRUMENTS which worked (644 pairs)
         std::vector<std::string> productTypes = {"USDT-FUTURES", "COIN-FUTURES", "USDC-FUTURES"};
 
         for (const auto& pType : productTypes) {
@@ -89,110 +88,146 @@ public:
                                                const std::string& timeframe,
                                                int64_t from_date,
                                                int64_t to_date) {
-        std::vector<Candle> candles;
+        std::vector<Candle> all_candles;
 
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitget-futures", "", "");
+        int64_t current_from = from_date;
+        int interval_sec = timeframeToSeconds(timeframe);
+        int64_t interval_ms = interval_sec * 1000;
+        const int limit = 1000; // Bitget Futures limit
+        int max_loops = 100;
 
-        // Bitget Futures Granularity: 1m, 5m, 15m, 30m, 1H, 4H, 12H, 1D, 1W
-        std::string granularity = "1m";
-        if (timeframe == "1m") granularity = "1m";
-        else if (timeframe == "5m") granularity = "5m";
-        else if (timeframe == "15m") granularity = "15m";
-        else if (timeframe == "30m") granularity = "30m";
-        else if (timeframe == "1h") granularity = "1H";
-        else if (timeframe == "4h") granularity = "4H";
-        else if (timeframe == "12h") granularity = "12H";
-        else if (timeframe == "1d") granularity = "1D";
-        else if (timeframe == "1w") granularity = "1W";
-        else granularity = "1m";
+        while (current_from < to_date) {
+            int64_t chunk_end = current_from + (limit * interval_ms);
+            if (chunk_end > to_date) chunk_end = to_date;
 
-        std::string symbol = instrument_name;
-        // Strip suffixes if they exist from V1 IDs (e.g. BTCUSDT_UMCBL -> BTCUSDT)
-        size_t underscore = symbol.find("_");
-        if (underscore != std::string::npos) {
-            symbol = symbol.substr(0, underscore);
-        }
+            ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "bitget-futures", "", "");
 
-        std::string productType = "USDT-FUTURES"; // Default
+            std::string granularity = "1m";
+            if (timeframe == "1m") granularity = "1m";
+            else if (timeframe == "5m") granularity = "5m";
+            else if (timeframe == "15m") granularity = "15m";
+            else if (timeframe == "30m") granularity = "30m";
+            else if (timeframe == "1h") granularity = "1H";
+            else if (timeframe == "4h") granularity = "4H";
+            else if (timeframe == "12h") granularity = "12H";
+            else if (timeframe == "1d") granularity = "1D";
+            else if (timeframe == "1w") granularity = "1W";
+            else granularity = "1m";
 
-        // Heuristic to detect product type
-        if (instrument_name.find("USDT") != std::string::npos) {
-            productType = "USDT-FUTURES";
-        } else if (instrument_name.find("USDC") != std::string::npos) {
-            productType = "USDC-FUTURES";
-        } else if (instrument_name.find("USD") != std::string::npos && instrument_name.find("USDT") == std::string::npos) {
-            // BTCUSD but not BTCUSDT
-            productType = "COIN-FUTURES";
-        }
+            std::string symbol = instrument_name;
+            size_t underscore = symbol.find("_");
+            if (underscore != std::string::npos) {
+                symbol = symbol.substr(0, underscore);
+            }
 
-        std::string query_string = "symbol=" + symbol + "&granularity=" + granularity + "&productType=" + productType;
-        if (from_date > 0) query_string += "&startTime=" + std::to_string(from_date);
-        if (to_date > 0) query_string += "&endTime=" + std::to_string(to_date);
+            std::string productType = "USDT-FUTURES";
+            if (instrument_name.find("USDT") != std::string::npos) {
+                productType = "USDT-FUTURES";
+            } else if (instrument_name.find("USDC") != std::string::npos) {
+                productType = "USDC-FUTURES";
+            } else if (instrument_name.find("USD") != std::string::npos && instrument_name.find("USDT") == std::string::npos) {
+                productType = "COIN-FUTURES";
+            }
 
-        request.appendParam({
-            {CCAPI_HTTP_PATH, "/api/v2/mix/market/candles"},
-            {CCAPI_HTTP_METHOD, "GET"},
-            {CCAPI_HTTP_QUERY_STRING, query_string}
-        });
+            std::string query_string = "symbol=" + symbol + "&granularity=" + granularity + "&productType=" + productType;
+            query_string += "&startTime=" + std::to_string(current_from);
+            query_string += "&endTime=" + std::to_string(chunk_end);
+            query_string += "&limit=" + std::to_string(limit);
 
-        session->sendRequest(request);
+            request.appendParam({
+                {CCAPI_HTTP_PATH, "/api/v2/mix/market/candles"},
+                {CCAPI_HTTP_METHOD, "GET"},
+                {CCAPI_HTTP_QUERY_STRING, query_string}
+            });
 
-        auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
-            std::vector<ccapi::Event> events = session->getEventQueue().purge();
-            for (const auto& event : events) {
-                if (event.getType() == ccapi::Event::Type::RESPONSE) {
-                    for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
-                            for (const auto& element : message.getElementList()) {
-                                if (element.has(CCAPI_HTTP_BODY)) {
-                                    std::string json_str = element.getValue(CCAPI_HTTP_BODY);
-                                    rapidjson::Document doc;
-                                    doc.Parse(json_str.c_str());
+            session->sendRequest(request);
 
-                                    // Bitget V2 returns Object with "data" array (array of arrays)
-                                    if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
-                                        for (const auto& item : doc["data"].GetArray()) {
-                                            if (item.IsArray() && item.Size() >= 6) {
-                                                Candle candle;
-                                                candle.timestamp = std::stoll(item[0].GetString());
-                                                candle.open = std::stod(item[1].GetString());
-                                                candle.high = std::stod(item[2].GetString());
-                                                candle.low = std::stod(item[3].GetString());
-                                                candle.close = std::stod(item[4].GetString());
-                                                candle.volume = std::stod(item[5].GetString()); // Base volume
+            std::vector<Candle> batch_candles;
+            bool success = false;
 
-                                                candles.push_back(candle);
+            auto start = std::chrono::steady_clock::now();
+            while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+                std::vector<ccapi::Event> events = session->getEventQueue().purge();
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                                for (const auto& element : message.getElementList()) {
+                                    if (element.has(CCAPI_HTTP_BODY)) {
+                                        std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                        rapidjson::Document doc;
+                                        doc.Parse(json_str.c_str());
+
+                                        if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("data") && doc["data"].IsArray()) {
+                                            for (const auto& item : doc["data"].GetArray()) {
+                                                if (item.IsArray() && item.Size() >= 6) {
+                                                    Candle candle;
+                                                    candle.timestamp = std::stoll(item[0].GetString());
+                                                    candle.open = std::stod(item[1].GetString());
+                                                    candle.high = std::stod(item[2].GetString());
+                                                    candle.low = std::stod(item[3].GetString());
+                                                    candle.close = std::stod(item[4].GetString());
+                                                    candle.volume = std::stod(item[5].GetString());
+
+                                                    batch_candles.push_back(candle);
+                                                }
                                             }
                                         }
-                                    } else {
-                                        // std::cout << "[DEBUG] Bitget Futures Parse Error or No Data: " << json_str << std::endl;
+                                        success = true;
                                     }
                                 }
+                            } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                                // std::cout << "[DEBUG] Bitget Futures Error: " << message.toString() << std::endl;
+                                success = true;
                             }
-                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                            std::cout << "[DEBUG] Bitget Futures Error: " << message.toString() << std::endl;
-                            return candles;
                         }
                     }
                 }
+                if (success) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
-            if (!candles.empty()) {
-                if (from_date > 0 || to_date > 0) {
-                    candles.erase(std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
-                        if (from_date > 0 && c.timestamp < from_date) return true;
-                        if (to_date > 0 && c.timestamp > to_date) return true;
-                        return false;
-                    }), candles.end());
-                }
-                std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                    return a.timestamp < b.timestamp;
-                });
-                return candles;
+
+            if (batch_candles.empty()) {
+                break;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            std::sort(batch_candles.begin(), batch_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+
+            all_candles.insert(all_candles.end(), batch_candles.begin(), batch_candles.end());
+
+            current_from = chunk_end;
+
+            if (--max_loops <= 0) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
-        return candles;
+
+        if (!all_candles.empty()) {
+             std::sort(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+            auto last = std::unique(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b){
+                return a.timestamp == b.timestamp;
+            });
+            all_candles.erase(last, all_candles.end());
+        }
+
+        return all_candles;
+    }
+
+    int timeframeToSeconds(const std::string& timeframe) {
+        // Bitget Futures timeframes mapping to seconds
+        if (timeframe == "1m") return 60;
+        if (timeframe == "5m") return 300;
+        if (timeframe == "15m") return 900;
+        if (timeframe == "30m") return 1800;
+        if (timeframe == "1h") return 3600;
+        if (timeframe == "4h") return 14400;
+        if (timeframe == "12h") return 43200;
+        if (timeframe == "1d") return 86400;
+        if (timeframe == "1w") return 604800;
+        return 60;
     }
 
 private:
