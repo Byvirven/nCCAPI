@@ -74,106 +74,142 @@ public:
                                                const std::string& timeframe,
                                                int64_t from_date,
                                                int64_t to_date) {
-        std::vector<Candle> candles;
+        std::vector<Candle> all_candles;
 
-        // Use GENERIC_PUBLIC_REQUEST for MEXC
-        ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "mexc", "", "GET_KLINES");
+        int64_t current_from = from_date;
+        const int limit = 1000;
+        int max_loops = 100;
 
         // Mexc intervals: 1m, 5m, 15m, 30m, 60m, 4h, 1d, 1M
         std::string interval = "1m";
-        if (timeframe == "1m") interval = "1m";
-        else if (timeframe == "5m") interval = "5m";
-        else if (timeframe == "15m") interval = "15m";
-        else if (timeframe == "30m") interval = "30m";
-        else if (timeframe == "1h") interval = "60m";
-        else if (timeframe == "4h") interval = "4h";
-        else if (timeframe == "1d") interval = "1d";
-        else if (timeframe == "1M") interval = "1M";
-        else interval = "1m";
+        int64_t interval_ms = 60000;
+        if (timeframe == "1m") { interval = "1m"; interval_ms = 60000; }
+        else if (timeframe == "5m") { interval = "5m"; interval_ms = 300000; }
+        else if (timeframe == "15m") { interval = "15m"; interval_ms = 900000; }
+        else if (timeframe == "30m") { interval = "30m"; interval_ms = 1800000; }
+        else if (timeframe == "1h") { interval = "60m"; interval_ms = 3600000; }
+        else if (timeframe == "4h") { interval = "4h"; interval_ms = 14400000; }
+        else if (timeframe == "1d") { interval = "1d"; interval_ms = 86400000; }
+        else if (timeframe == "1M") { interval = "1M"; interval_ms = 2592000000; } // approx
 
-        std::string query_string = "symbol=" + instrument_name + "&interval=" + interval;
-        if (from_date > 0) query_string += "&startTime=" + std::to_string(from_date);
-        if (to_date > 0) query_string += "&endTime=" + std::to_string(to_date);
-        query_string += "&limit=1000";
+        while (current_from < to_date) {
+            int64_t chunk_end = current_from + (limit * interval_ms);
+            // Strict Window Chunking: ensure we don't request too far ahead,
+            // but also don't request past the ultimate to_date
+            if (chunk_end > to_date) chunk_end = to_date;
 
-        request.appendParam({
-            {CCAPI_HTTP_PATH, "/api/v3/klines"},
-            {CCAPI_HTTP_METHOD, "GET"},
-            {CCAPI_HTTP_QUERY_STRING, query_string}
-        });
+            ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "mexc", "", "");
 
-        session->sendRequest(request);
+            std::string query_string = "symbol=" + instrument_name + "&interval=" + interval;
+            if (current_from > 0) query_string += "&startTime=" + std::to_string(current_from);
+            // Note: MEXC returns [startTime, endTime].
+            // If we don't set endTime, it might return up to current time or limit.
+            // Let's set endTime to strictly control the window.
+            if (chunk_end > 0) query_string += "&endTime=" + std::to_string(chunk_end);
 
-        auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
-            std::vector<ccapi::Event> events = session->getEventQueue().purge();
-            for (const auto& event : events) {
-                if (event.getType() == ccapi::Event::Type::RESPONSE) {
-                    for (const auto& message : event.getMessageList()) {
-                        if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
-                            for (const auto& element : message.getElementList()) {
-                                if (element.has(CCAPI_HTTP_BODY)) {
-                                    std::string json_str = element.getValue(CCAPI_HTTP_BODY);
-                                    rapidjson::Document doc;
-                                    doc.Parse(json_str.c_str());
+            query_string += "&limit=" + std::to_string(limit);
 
-                                    if (!doc.HasParseError() && doc.IsArray()) {
-                                        for (const auto& item : doc.GetArray()) {
-                                            // [1660124280000, "24250", "24250.01", "24244.66", "24245.01", "3.08", "74697.518", "1660124339999"]
-                                            if (item.IsArray() && item.Size() >= 6) {
-                                                Candle candle;
-                                                if (item[0].IsInt64()) candle.timestamp = item[0].GetInt64();
-                                                else if (item[0].IsString()) candle.timestamp = std::stoll(item[0].GetString());
+            request.appendParam({
+                {CCAPI_HTTP_PATH, "/api/v3/klines"},
+                {CCAPI_HTTP_METHOD, "GET"},
+                {CCAPI_HTTP_QUERY_STRING, query_string}
+            });
 
-                                                auto getVal = [](const rapidjson::Value& v) -> double {
-                                                    if (v.IsString()) return std::stod(v.GetString());
-                                                    if (v.IsDouble()) return v.GetDouble();
-                                                    return 0.0;
-                                                };
+            session->sendRequest(request);
 
-                                                candle.open = getVal(item[1]);
-                                                candle.high = getVal(item[2]);
-                                                candle.low = getVal(item[3]);
-                                                candle.close = getVal(item[4]);
-                                                candle.volume = getVal(item[5]);
+            std::vector<Candle> batch_candles;
+            bool success = false;
 
-                                                candles.push_back(candle);
+            auto start = std::chrono::steady_clock::now();
+            while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+                std::vector<ccapi::Event> events = session->getEventQueue().purge();
+                for (const auto& event : events) {
+                    if (event.getType() == ccapi::Event::Type::RESPONSE) {
+                        for (const auto& message : event.getMessageList()) {
+                            if (message.getType() == ccapi::Message::Type::GENERIC_PUBLIC_REQUEST) {
+                                for (const auto& element : message.getElementList()) {
+                                    if (element.has(CCAPI_HTTP_BODY)) {
+                                        std::string json_str = element.getValue(CCAPI_HTTP_BODY);
+                                        rapidjson::Document doc;
+                                        doc.Parse(json_str.c_str());
+
+                                        if (!doc.HasParseError() && doc.IsArray()) {
+                                            for (const auto& item : doc.GetArray()) {
+                                                // [1660124280000, "24250", "24250.01", "24244.66", "24245.01", "3.08", "74697.518", "1660124339999"]
+                                                if (item.IsArray() && item.Size() >= 6) {
+                                                    Candle candle;
+                                                    if (item[0].IsInt64()) candle.timestamp = item[0].GetInt64();
+                                                    else if (item[0].IsString()) candle.timestamp = std::stoll(item[0].GetString());
+
+                                                    auto getVal = [](const rapidjson::Value& v) -> double {
+                                                        if (v.IsString()) return std::stod(v.GetString());
+                                                        if (v.IsDouble()) return v.GetDouble();
+                                                        return 0.0;
+                                                    };
+
+                                                    candle.open = getVal(item[1]);
+                                                    candle.high = getVal(item[2]);
+                                                    candle.low = getVal(item[3]);
+                                                    candle.close = getVal(item[4]);
+                                                    candle.volume = getVal(item[5]);
+
+                                                    batch_candles.push_back(candle);
+                                                }
                                             }
+                                            success = true;
                                         }
-                                        // Sort first
-                                        std::sort(candles.begin(), candles.end(), [](const Candle& a, const Candle& b) {
-                                            return a.timestamp < b.timestamp;
-                                        });
-
-                                        // Filter
-                                        if (!candles.empty()) {
-                                            if (from_date > 0 || to_date > 0) {
-                                                candles.erase(std::remove_if(candles.begin(), candles.end(), [from_date, to_date](const Candle& c) {
-                                                    if (from_date > 0 && c.timestamp < from_date) return true;
-                                                    if (to_date > 0 && c.timestamp > to_date) return true;
-                                                    return false;
-                                                }), candles.end());
-                                            }
-                                        }
-                                        return candles;
-                                    } else {
-                                        // std::cout << "[DEBUG] MEXC Parse Error or Not Array: " << json_str << std::endl;
                                     }
                                 }
+                            } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
+                                // std::cout << "[DEBUG] MEXC Error: " << message.toString() << std::endl;
+                                success = true;
                             }
-                        } else if (message.getType() == ccapi::Message::Type::RESPONSE_ERROR) {
-                            std::cout << "[DEBUG] MEXC Error: " << message.toString() << std::endl;
-                            for (const auto& elem : message.getElementList()) {
-                                std::cout << "Element: " << elem.toString() << std::endl;
-                            }
-                            return candles;
                         }
                     }
                 }
+                if (success) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            if (batch_candles.empty()) {
+                current_from = chunk_end;
+            } else {
+                 std::sort(batch_candles.begin(), batch_candles.end(), [](const Candle& a, const Candle& b) {
+                    return a.timestamp < b.timestamp;
+                });
+
+                all_candles.insert(all_candles.end(), batch_candles.begin(), batch_candles.end());
+
+                // Advance current_from to the end of this batch or chunk
+                current_from = chunk_end;
+            }
+
+            if (--max_loops <= 0) break;
+            if (current_from >= to_date) break;
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
-        return candles;
+
+        if (!all_candles.empty()) {
+            std::sort(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b) {
+                return a.timestamp < b.timestamp;
+            });
+            auto last = std::unique(all_candles.begin(), all_candles.end(), [](const Candle& a, const Candle& b){
+                return a.timestamp == b.timestamp;
+            });
+            all_candles.erase(last, all_candles.end());
+
+             if (from_date > 0 || to_date > 0) {
+                 auto it = std::remove_if(all_candles.begin(), all_candles.end(), [from_date, to_date](const Candle& c) {
+                     if (to_date > 0 && c.timestamp > to_date) return true;
+                     if (from_date > 0 && c.timestamp < from_date) return true;
+                     return false;
+                 });
+                 all_candles.erase(it, all_candles.end());
+             }
+        }
+
+        return all_candles;
     }
 
 private:
