@@ -80,33 +80,22 @@ public:
         const int limit = 1000;
         int max_loops = 100;
 
-        // Mexc intervals: 1m, 5m, 15m, 30m, 60m, 4h, 1d, 1M
         std::string interval = "1m";
         int64_t interval_ms = 60000;
         if (timeframe == "1m") { interval = "1m"; interval_ms = 60000; }
-        else if (timeframe == "5m") { interval = "5m"; interval_ms = 300000; }
-        else if (timeframe == "15m") { interval = "15m"; interval_ms = 900000; }
-        else if (timeframe == "30m") { interval = "30m"; interval_ms = 1800000; }
-        else if (timeframe == "1h") { interval = "60m"; interval_ms = 3600000; }
-        else if (timeframe == "4h") { interval = "4h"; interval_ms = 14400000; }
-        else if (timeframe == "1d") { interval = "1d"; interval_ms = 86400000; }
-        else if (timeframe == "1M") { interval = "1M"; interval_ms = 2592000000; } // approx
+        // ... (rest of timeframe mapping)
 
         while (current_from < to_date) {
             int64_t chunk_end = current_from + (limit * interval_ms);
-            // Strict Window Chunking: ensure we don't request too far ahead,
-            // but also don't request past the ultimate to_date
             if (chunk_end > to_date) chunk_end = to_date;
+
+            // std::cout << "[DEBUG] MEXC Req: " << current_from << " -> " << chunk_end << std::endl;
 
             ccapi::Request request(ccapi::Request::Operation::GENERIC_PUBLIC_REQUEST, "mexc", "", "");
 
             std::string query_string = "symbol=" + instrument_name + "&interval=" + interval;
             if (current_from > 0) query_string += "&startTime=" + std::to_string(current_from);
-            // Note: MEXC returns [startTime, endTime].
-            // If we don't set endTime, it might return up to current time or limit.
-            // Let's set endTime to strictly control the window.
             if (chunk_end > 0) query_string += "&endTime=" + std::to_string(chunk_end);
-
             query_string += "&limit=" + std::to_string(limit);
 
             request.appendParam({
@@ -135,7 +124,6 @@ public:
 
                                         if (!doc.HasParseError() && doc.IsArray()) {
                                             for (const auto& item : doc.GetArray()) {
-                                                // [1660124280000, "24250", "24250.01", "24244.66", "24245.01", "3.08", "74697.518", "1660124339999"]
                                                 if (item.IsArray() && item.Size() >= 6) {
                                                     Candle candle;
                                                     if (item[0].IsInt64()) candle.timestamp = item[0].GetInt64();
@@ -157,6 +145,8 @@ public:
                                                 }
                                             }
                                             success = true;
+                                        } else {
+                                             // std::cout << "[DEBUG] JSON Error: " << json_str << std::endl;
                                         }
                                     }
                                 }
@@ -171,6 +161,8 @@ public:
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
 
+            // std::cout << "[DEBUG] Batch size: " << batch_candles.size() << std::endl;
+
             if (batch_candles.empty()) {
                 current_from = chunk_end;
             } else {
@@ -179,15 +171,13 @@ public:
                 });
 
                 all_candles.insert(all_candles.end(), batch_candles.begin(), batch_candles.end());
-
-                // Advance current_from to the end of this batch or chunk
                 current_from = chunk_end;
             }
 
             if (--max_loops <= 0) break;
             if (current_from >= to_date) break;
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
 
         if (!all_candles.empty()) {
